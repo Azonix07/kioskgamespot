@@ -3,7 +3,8 @@ const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
-
+const multer = require('multer');
+const { v4: uuidv4 } = require('uuid');
 
 // Restore `console.log` if overridden
 console.log = console.log || ((...args) => process.stdout.write(args.join(' ') + '\n'));
@@ -16,6 +17,22 @@ const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function(req, file, cb) {
+    cb(null, uploadsDir);
+  },
+  filename: function(req, file, cb) {
+    const uniqueFilename = `${uuidv4()}${path.extname(file.originalname)}`;
+    cb(null, uniqueFilename);
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB max file size
+});
 
 // Global error handlers
 process.on('uncaughtException', (err) => {
@@ -102,6 +119,22 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 // Serve the uploaded photos
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// First serve static files from the frontend directory if it exists
+const frontendDir = path.join(__dirname, 'frontend');
+if (fs.existsSync(frontendDir)) {
+  console.log(`Serving frontend files from: ${frontendDir}`);
+  app.use(express.static(frontendDir));
+}
+
+// Then serve static files from public directory as a fallback
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Log all API requests
+app.use('/api', (req, res, next) => {
+  console.log(`API Request: ${req.method} ${req.url}`);
+  next();
+});
 
 // Endpoint to get the status of consoles
 app.get('/api/status', (req, res) => {
@@ -271,7 +304,7 @@ app.get('/api/payments', (req, res) => {
     }
     
     // Convert relative URLs to absolute URLs for photos
-    const baseUrl = `http://${req.headers.host}`;
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
     const payments = rows.map(row => ({
       ...row,
       photoUrl: row.photo_url ? `${baseUrl}${row.photo_url}` : null
@@ -283,7 +316,7 @@ app.get('/api/payments', (req, res) => {
 
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
-  const currentDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const currentDate = "2025-07-22 13:58:04";
   const currentUser = 'Azonix07';
   
   res.json({
@@ -379,10 +412,35 @@ app.post('/api/reset-single', (req, res) => {
   }
 });
 
+// Fixed: Properly handle client-side routing for frontend
+app.get('*', (req, res, next) => {
+  // Skip API routes and file extensions
+  if (req.path.startsWith('/api') || req.path.match(/\.[a-zA-Z0-9]+$/)) {
+    return next();
+  }
+  
+  // Try to send index.html from frontend directory first
+  const frontendIndexPath = path.join(__dirname, 'frontend', 'index.html');
+  if (fs.existsSync(frontendIndexPath)) {
+    return res.sendFile(frontendIndexPath);
+  }
+  
+  // Fall back to public directory if frontend index.html doesn't exist
+  const publicIndexPath = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(publicIndexPath)) {
+    return res.sendFile(publicIndexPath);
+  }
+  
+  // If neither exists, return a 404
+  res.status(404).send('Cannot find application entry point (index.html)');
+});
+
 // Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  const now = new Date().toISOString();
-  console.log(`🚀 Backend running at http://localhost:${PORT} (${now})`);
-  console.log(`Current User: Azonix07`);
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 13:58:04`);
+  console.log(`Current User's Login: Azonix07`);
+  console.log(`🚀 Unified server running on port ${PORT}`);
+  console.log(`API endpoints available at http://localhost:${PORT}/api`);
+  console.log(`Frontend served from http://localhost:${PORT}`);
 });
