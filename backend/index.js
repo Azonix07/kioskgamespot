@@ -73,21 +73,43 @@ function initializeDatabase() {
     });
   });
   
-  // Ensure payments table exists with all necessary columns including photo_data
+  // First, ensure the basic payments table exists
   db.run(`CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     console TEXT,
     minutes INTEGER,
     method TEXT,
     user TEXT DEFAULT 'Azonix07',
-    paid_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    photo_url TEXT,
-    photo_data TEXT
+    paid_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`, function(err) {
     if (err) {
       return console.error("Error creating payments table:", err.message);
     }
-    console.log("payments table ready.");
+    console.log("Basic payments table ready.");
+    
+    // Now check if the photo_data column exists in the payments table
+    db.all("PRAGMA table_info(payments)", [], function(err, columns) {
+      if (err) {
+        return console.error("Error checking payments table columns:", err.message);
+      }
+      
+      // Look for photo_data column
+      const hasPhotoData = columns.some(col => col.name === 'photo_data');
+      
+      if (!hasPhotoData) {
+        // Add photo_data column to existing table
+        console.log("Adding photo_data column to payments table");
+        db.run("ALTER TABLE payments ADD COLUMN photo_data TEXT", function(err) {
+          if (err) {
+            console.error("Error adding photo_data column:", err.message);
+          } else {
+            console.log("photo_data column added successfully");
+          }
+        });
+      } else {
+        console.log("photo_data column already exists in payments table");
+      }
+    });
   });
 }
 
@@ -109,7 +131,7 @@ initializeDatabase();
 
 app.use(cors());
 // Increase JSON size limit for base64 encoded images
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '20mb' }));
 
 // First try to serve from parent frontend directory
 const parentFrontendDir = path.join(__dirname, '..', 'frontend');
@@ -227,73 +249,108 @@ app.post('/api/pay', (req, res) => {
 
 // Helper function to process payment and update database with Base64 photo
 function processPaymentWithBase64(console, minutes, method, photoData, res) {
-  // SQL query now stores photo data directly in the database
-  const sql = 'INSERT INTO payments (console, minutes, method, user, photo_data) VALUES (?, ?, ?, ?, ?)';
-  const params = [console, minutes, method, 'Azonix07', photoData || null];
-  
-  // Insert payment record
-  db.run(sql, params, function(err) {
+  // Check if photo_data column exists first
+  db.get("PRAGMA table_info(payments)", [], function(err, columns) {
     if (err) {
-      console.error("Database error during payment:", err.message);
+      console.error("Error checking table info:", err.message);
       return res.status(500).json({ error: `Database error: ${err.message}` });
     }
     
-    console.log(`Payment processed successfully: ID=${this.lastID}, console="${console}", minutes=${minutes}, method="${method}", photo=${photoData ? 'Yes' : 'No'}`);
+    // Set up the SQL based on whether photo_data column exists
+    let sql, params;
     
-    // Book the console
-    const endTime = Date.now() + minutes * 60 * 1000;
+    // Check if columns is an array with items
+    if (Array.isArray(columns) && columns.some(col => col.name === 'photo_data')) {
+      // Photo_data column exists, use it
+      sql = 'INSERT INTO payments (console, minutes, method, user, photo_data) VALUES (?, ?, ?, ?, ?)';
+      params = [console, minutes, method, 'Azonix07', photoData || null];
+    } else {
+      // Fall back to not using photo_data
+      sql = 'INSERT INTO payments (console, minutes, method, user) VALUES (?, ?, ?, ?)';
+      params = [console, minutes, method, 'Azonix07'];
+    }
     
-    db.run(
-      'UPDATE ps5_consoles SET booked = 1, end_time = ? WHERE name = ?',
-      [endTime, console],
-      function(err) {
-        if (err) {
-          console.error("Error updating console status after payment:", err.message);
-          // Payment was successful even if booking fails
-        } else {
-          console.log(`Console "${console}" marked as booked until ${new Date(endTime).toISOString()}`);
-        }
-        
-        // Return success even if booking update failed
-        res.json({ 
-          success: true,
-          message: "Payment processed successfully",
-          paymentId: this.lastID,
-          timestamp: new Date().toISOString(),
-          photoUrl: photoData ? true : false
-        });
+    // Insert payment record
+    db.run(sql, params, function(err) {
+      if (err) {
+        console.error("Database error during payment:", err.message);
+        return res.status(500).json({ error: `Database error: ${err.message}` });
       }
-    );
+      
+      console.log(`Payment processed successfully: ID=${this.lastID}, console="${console}", minutes=${minutes}, method="${method}", photo=${photoData ? 'Yes' : 'No'}`);
+      
+      // Book the console
+      const endTime = Date.now() + minutes * 60 * 1000;
+      
+      db.run(
+        'UPDATE ps5_consoles SET booked = 1, end_time = ? WHERE name = ?',
+        [endTime, console],
+        function(err) {
+          if (err) {
+            console.error("Error updating console status after payment:", err.message);
+            // Payment was successful even if booking fails
+          } else {
+            console.log(`Console "${console}" marked as booked until ${new Date(endTime).toISOString()}`);
+          }
+          
+          // Return success even if booking update failed
+          res.json({ 
+            success: true,
+            message: "Payment processed successfully",
+            paymentId: this.lastID,
+            timestamp: new Date().toISOString(),
+            photoUrl: photoData ? true : false
+          });
+        }
+      );
+    });
   });
 }
 
 // Enhanced payments endpoint with compatibility for both photoData and photoUrl
 app.get('/api/payments', (req, res) => {
-  db.all('SELECT id, console, minutes, method, user, paid_at, photo_data FROM payments ORDER BY paid_at DESC', [], (err, rows) => {
+  // First check if photo_data column exists
+  db.all("PRAGMA table_info(payments)", [], function(err, columns) {
     if (err) {
-      console.error("Error fetching payments:", err.message);
-      return res.status(500).json({ error: 'Failed to fetch payment history' });
+      console.error("Error checking table info:", err.message);
+      return res.status(500).json({ error: 'Failed to check payments table schema' });
     }
     
-    const payments = rows.map(row => {
-      // Format the photo data properly and return in both fields for compatibility
-      const formattedPhotoData = ensureDataUrlFormat(row.photo_data);
-      
-      return {
-        ...row,
-        photoUrl: formattedPhotoData,
-        photoData: formattedPhotoData
-      };
-    });
+    // Check if photo_data column exists
+    const hasPhotoData = Array.isArray(columns) && columns.some(col => col.name === 'photo_data');
     
-    res.json(payments);
+    // Choose the appropriate query based on schema
+    const query = hasPhotoData 
+      ? 'SELECT id, console, minutes, method, user, paid_at, photo_data FROM payments ORDER BY paid_at DESC'
+      : 'SELECT id, console, minutes, method, user, paid_at FROM payments ORDER BY paid_at DESC';
+    
+    db.all(query, [], (err, rows) => {
+      if (err) {
+        console.error("Error fetching payments:", err.message);
+        return res.status(500).json({ error: 'Failed to fetch payment history' });
+      }
+      
+      const payments = rows.map(row => {
+        // Format the photo data if it exists
+        const formattedPhotoData = row.photo_data ? ensureDataUrlFormat(row.photo_data) : null;
+        
+        return {
+          ...row,
+          // Return both photoUrl and photoData for compatibility
+          photoUrl: formattedPhotoData,
+          photoData: formattedPhotoData
+        };
+      });
+      
+      res.json(payments);
+    });
   });
 });
 
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
   // Updated timestamp
-  const currentDate = "2025-07-22 15:18:54";
+  const currentDate = "2025-07-22 17:53:51";
   const currentUser = 'Azonix07';
   
   res.json({
@@ -306,7 +363,7 @@ app.get('/api/info', (req, res) => {
   });
 });
 
-// Debug endpoint to check database tables
+// Debug endpoint to check database tables and schema
 app.get('/api/debug/tables', (req, res) => {
   db.all("SELECT name FROM sqlite_master WHERE type='table'", [], (err, tables) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -334,34 +391,6 @@ app.get('/api/debug/tables', (req, res) => {
           });
         }
       });
-    });
-  });
-});
-
-// Debug endpoint to check payment data
-app.get('/api/debug/payment/:id', (req, res) => {
-  const paymentId = req.params.id;
-  
-  if (!paymentId) {
-    return res.status(400).json({ error: 'Missing payment ID' });
-  }
-  
-  db.get('SELECT * FROM payments WHERE id = ?', [paymentId], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    
-    if (!row) {
-      return res.status(404).json({ error: 'Payment not found' });
-    }
-    
-    // Return full details including photo data
-    res.json({
-      payment: {
-        ...row,
-        hasPhotoData: !!row.photo_data,
-        photoDataLength: row.photo_data ? row.photo_data.length : 0
-      }
     });
   });
 });
@@ -417,8 +446,7 @@ app.post('/api/reset-single', (req, res) => {
   }
 });
 
-// FIXED: Use middleware instead of route handler to avoid path-to-regexp issues
-// This avoids the problematic '/*' pattern that causes the error
+// Serve index.html for client-side routing
 app.use((req, res, next) => {
   // Skip API routes, static files, and files with extensions
   if (req.path.startsWith('/api') || req.path.indexOf('.') !== -1) {
@@ -455,7 +483,7 @@ app.use((req, res, next) => {
 // Start the server
 app.listen(PORT, () => {
   // Updated timestamp
-  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 15:18:54`);
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 17:53:51`);
   console.log(`Current User's Login: Azonix07`);
   console.log(`🚀 Unified server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
