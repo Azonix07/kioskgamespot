@@ -10,10 +10,16 @@ const { v4: uuidv4 } = require('uuid');
 console.log = console.log || ((...args) => process.stdout.write(args.join(' ') + '\n'));
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 const dbPath = path.resolve(__dirname, 'gamespot.db');
 
-// Create uploads directory for photos
-const uploadsDir = path.join(__dirname, 'uploads');
+// Create uploads directory for photos - Use persistent path in production
+const uploadsDir = process.env.NODE_ENV === 'production'
+  ? process.env.UPLOADS_DIR || path.join(__dirname, 'uploads') // Use env var if defined
+  : path.join(__dirname, 'uploads');
+
+console.log(`Using uploads directory: ${uploadsDir}`);
+
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
@@ -117,8 +123,14 @@ initializeDatabase();
 app.use(cors());
 // Increase JSON size limit for base64 encoded images
 app.use(express.json({ limit: '10mb' }));
-// Serve the uploaded photos
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Serve the uploaded photos with proper headers
+app.use('/uploads', (req, res, next) => {
+  // Add proper headers for images
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+  next();
+}, express.static(uploadsDir));
 
 // First try to serve from parent frontend directory
 const parentFrontendDir = path.join(__dirname, '..', 'frontend');
@@ -306,7 +318,7 @@ function processPayment(console, minutes, method, photoUrl, res) {
   });
 }
 
-// Enhanced payments endpoint to include photos
+// Enhanced payments endpoint to include photos with improved URL construction
 app.get('/api/payments', (req, res) => {
   db.all('SELECT id, console, minutes, method, user, paid_at, photo_url FROM payments ORDER BY paid_at DESC', [], (err, rows) => {
     if (err) {
@@ -314,12 +326,29 @@ app.get('/api/payments', (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch payment history' });
     }
     
-    // Convert relative URLs to absolute URLs for photos
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const payments = rows.map(row => ({
-      ...row,
-      photoUrl: row.photo_url ? `${baseUrl}${row.photo_url}` : null
-    }));
+    // Build a proper base URL that works in all environments
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+    
+    console.log(`Constructing photo URLs with base: ${baseUrl}`);
+    
+    const payments = rows.map(row => {
+      // Handle photo URL properly
+      let photoUrl = null;
+      if (row.photo_url) {
+        // Make sure the URL starts with /
+        const photoPath = row.photo_url.startsWith('/') ? row.photo_url : `/${row.photo_url}`;
+        photoUrl = `${baseUrl}${photoPath}`;
+      }
+      
+      return {
+        ...row,
+        photoUrl,
+        // Also include original path for debugging
+        original_photo_url: row.photo_url
+      };
+    });
     
     res.json(payments);
   });
@@ -328,7 +357,7 @@ app.get('/api/payments', (req, res) => {
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
   // Updated timestamp
-  const currentDate = "2025-07-22 14:46:06";
+  const currentDate = "2025-07-22 14:56:17";
   const currentUser = 'Azonix07';
   
   res.json({
@@ -336,7 +365,8 @@ app.get('/api/info', (req, res) => {
     user: currentUser,
     server: {
       uptime: process.uptime(),
-      nodeVersion: process.version
+      nodeVersion: process.version,
+      uploadsDir: uploadsDir
     }
   });
 });
@@ -369,6 +399,37 @@ app.get('/api/debug/tables', (req, res) => {
           });
         }
       });
+    });
+  });
+});
+
+// Debug endpoint to check photo URLs
+app.get('/api/debug/photos', (req, res) => {
+  db.all('SELECT id, photo_url FROM payments WHERE photo_url IS NOT NULL', [], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    
+    // Build a proper base URL that works in all environments
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+    
+    const photos = rows.map(row => ({
+      id: row.id,
+      originalUrl: row.photo_url,
+      fullUrl: `${baseUrl}${row.photo_url.startsWith('/') ? '' : '/'}${row.photo_url}`,
+      exists: fs.existsSync(path.join(uploadsDir, path.basename(row.photo_url)))
+    }));
+    
+    res.json({
+      uploadsDir,
+      photos,
+      headers: {
+        host: req.get('host'),
+        forwardedHost: req.headers['x-forwarded-host'],
+        forwardedProto: req.headers['x-forwarded-proto']
+      }
     });
   });
 });
@@ -460,10 +521,9 @@ app.use((req, res, next) => {
 });
 
 // Start the server
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   // Updated timestamp
-  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 14:46:06`);
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 14:56:17`);
   console.log(`Current User's Login: Azonix07`);
   console.log(`🚀 Unified server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
