@@ -13,33 +13,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const dbPath = path.resolve(__dirname, 'gamespot.db');
 
-// Create uploads directory for photos - Use persistent path in production
-const uploadsDir = process.env.NODE_ENV === 'production'
-  ? process.env.UPLOADS_DIR || path.join(__dirname, 'uploads') // Use env var if defined
-  : path.join(__dirname, 'uploads');
-
-console.log(`Using uploads directory: ${uploadsDir}`);
-
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: function(req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function(req, file, cb) {
-    const uniqueFilename = `${uuidv4()}${path.extname(file.originalname)}`;
-    cb(null, uniqueFilename);
-  }
-});
-
-const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB max file size
-});
-
 // Global error handlers
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err.message, err.stack);
@@ -100,7 +73,7 @@ function initializeDatabase() {
     });
   });
   
-  // Ensure payments table exists with all necessary columns including photo_url
+  // Ensure payments table exists with all necessary columns including photo_data
   db.run(`CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     console TEXT,
@@ -108,12 +81,28 @@ function initializeDatabase() {
     method TEXT,
     user TEXT DEFAULT 'Azonix07',
     paid_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    photo_url TEXT
+    photo_data TEXT
   )`, function(err) {
     if (err) {
       return console.error("Error creating payments table:", err.message);
     }
     console.log("payments table ready.");
+    
+    // Check if we need to migrate from photo_url to photo_data
+    db.get("PRAGMA table_info(payments)", [], function(err, row) {
+      if (err) {
+        return console.error("Error checking payments columns:", err.message);
+      }
+      
+      // If photo_url exists but photo_data doesn't, add photo_data column
+      const columns = row ? [row.name] : [];
+      if (columns.includes('photo_url') && !columns.includes('photo_data')) {
+        console.log("Adding photo_data column to payments table");
+        db.run("ALTER TABLE payments ADD COLUMN photo_data TEXT", function(err) {
+          if (err) console.error("Error adding photo_data column:", err.message);
+        });
+      }
+    });
   });
 }
 
@@ -123,14 +112,6 @@ initializeDatabase();
 app.use(cors());
 // Increase JSON size limit for base64 encoded images
 app.use(express.json({ limit: '10mb' }));
-
-// Serve the uploaded photos with proper headers
-app.use('/uploads', (req, res, next) => {
-  // Add proper headers for images
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
-  next();
-}, express.static(uploadsDir));
 
 // First try to serve from parent frontend directory
 const parentFrontendDir = path.join(__dirname, '..', 'frontend');
@@ -211,7 +192,7 @@ app.post('/api/book', (req, res) => {
   );
 });
 
-// Enhanced payment endpoint that accepts and processes photos
+// Enhanced payment endpoint that saves photo as Base64
 app.post('/api/pay', (req, res) => {
   const { console, minutes, method, photoData } = req.body;
   
@@ -236,50 +217,20 @@ app.post('/api/pay', (req, res) => {
     return res.status(400).json({ error: 'Missing payment method' });
   }
   
-  // Process the photo if provided
-  if (photoData && photoData.startsWith('data:image')) {
-    try {
-      // Extract base64 data
-      const base64Data = photoData.replace(/^data:image\/\w+;base64,/, "");
-      const buffer = Buffer.from(base64Data, 'base64');
-      
-      // Create a filename with timestamp to ensure uniqueness
-      const filename = `user_${Date.now()}.jpg`;
-      const filePath = path.join(uploadsDir, filename);
-      
-      // Save the image file
-      fs.writeFile(filePath, buffer, (err) => {
-        if (err) {
-          console.error("Error saving photo:", err);
-          // Continue without photo if saving fails
-          processPayment(console, minutesNumber, method, null, res);
-        } else {
-          // Process payment with photo URL
-          const photoUrl = `/uploads/${filename}`;
-          processPayment(console, minutesNumber, method, photoUrl, res);
-        }
-      });
-    } catch (error) {
-      console.error("Error processing photo:", error);
-      // Continue without photo if processing fails
-      processPayment(console, minutesNumber, method, null, res);
-    }
-  } else {
-    // No photo provided, process payment normally
-    processPayment(console, minutesNumber, method, null, res);
-  }
+  // Process payment directly with the photoData
+  processPaymentWithBase64(console, minutesNumber, method, photoData, res);
 });
 
-// Helper function to process payment and update database
-function processPayment(console, minutes, method, photoUrl, res) {
+// Helper function to process payment and update database with Base64 photo
+function processPaymentWithBase64(console, minutes, method, photoData, res) {
   // SQL query based on whether photo is available
-  const sql = photoUrl 
-    ? 'INSERT INTO payments (console, minutes, method, user, photo_url) VALUES (?, ?, ?, ?, ?)'
+  const sql = photoData 
+    ? 'INSERT INTO payments (console, minutes, method, user, photo_data) VALUES (?, ?, ?, ?, ?)'
     : 'INSERT INTO payments (console, minutes, method, user) VALUES (?, ?, ?, ?)';
   
   // Parameters based on whether photo is available
-  const params = photoUrl
-    ? [console, minutes, method, 'Azonix07', photoUrl]
+  const params = photoData
+    ? [console, minutes, method, 'Azonix07', photoData]
     : [console, minutes, method, 'Azonix07'];
   
   // Insert payment record
@@ -289,7 +240,7 @@ function processPayment(console, minutes, method, photoUrl, res) {
       return res.status(500).json({ error: `Database error: ${err.message}` });
     }
     
-    console.log(`Payment processed successfully: ID=${this.lastID}, console="${console}", minutes=${minutes}, method="${method}", photo=${photoUrl ? 'Yes' : 'No'}`);
+    console.log(`Payment processed successfully: ID=${this.lastID}, console="${console}", minutes=${minutes}, method="${method}", photo=${photoData ? 'Yes' : 'No'}`);
     
     // Book the console
     const endTime = Date.now() + minutes * 60 * 1000;
@@ -311,44 +262,26 @@ function processPayment(console, minutes, method, photoUrl, res) {
           message: "Payment processed successfully",
           paymentId: this.lastID,
           timestamp: new Date().toISOString(),
-          photoUrl: photoUrl
+          photoData: photoData ? true : false
         });
       }
     );
   });
 }
 
-// Enhanced payments endpoint to include photos with improved URL construction
+// Enhanced payments endpoint to include photos as base64 strings
 app.get('/api/payments', (req, res) => {
-  db.all('SELECT id, console, minutes, method, user, paid_at, photo_url FROM payments ORDER BY paid_at DESC', [], (err, rows) => {
+  db.all('SELECT id, console, minutes, method, user, paid_at, photo_data FROM payments ORDER BY paid_at DESC', [], (err, rows) => {
     if (err) {
       console.error("Error fetching payments:", err.message);
       return res.status(500).json({ error: 'Failed to fetch payment history' });
     }
     
-    // Build a proper base URL that works in all environments
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = req.headers['x-forwarded-host'] || req.get('host');
-    const baseUrl = `${protocol}://${host}`;
-    
-    console.log(`Constructing photo URLs with base: ${baseUrl}`);
-    
-    const payments = rows.map(row => {
-      // Handle photo URL properly
-      let photoUrl = null;
-      if (row.photo_url) {
-        // Make sure the URL starts with /
-        const photoPath = row.photo_url.startsWith('/') ? row.photo_url : `/${row.photo_url}`;
-        photoUrl = `${baseUrl}${photoPath}`;
-      }
-      
-      return {
-        ...row,
-        photoUrl,
-        // Also include original path for debugging
-        original_photo_url: row.photo_url
-      };
-    });
+    const payments = rows.map(row => ({
+      ...row,
+      // Pass through the base64 data directly
+      photoUrl: row.photo_data ? row.photo_data : null
+    }));
     
     res.json(payments);
   });
@@ -357,7 +290,7 @@ app.get('/api/payments', (req, res) => {
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
   // Updated timestamp
-  const currentDate = "2025-07-22 14:56:17";
+  const currentDate = "2025-07-22 15:01:25";
   const currentUser = 'Azonix07';
   
   res.json({
@@ -365,8 +298,7 @@ app.get('/api/info', (req, res) => {
     user: currentUser,
     server: {
       uptime: process.uptime(),
-      nodeVersion: process.version,
-      uploadsDir: uploadsDir
+      nodeVersion: process.version
     }
   });
 });
@@ -403,34 +335,21 @@ app.get('/api/debug/tables', (req, res) => {
   });
 });
 
-// Debug endpoint to check photo URLs
+// Debug endpoint to check photo storage
 app.get('/api/debug/photos', (req, res) => {
-  db.all('SELECT id, photo_url FROM payments WHERE photo_url IS NOT NULL', [], (err, rows) => {
+  db.all('SELECT id, photo_data FROM payments WHERE photo_data IS NOT NULL LIMIT 5', [], (err, rows) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
     
-    // Build a proper base URL that works in all environments
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = req.headers['x-forwarded-host'] || req.get('host');
-    const baseUrl = `${protocol}://${host}`;
-    
     const photos = rows.map(row => ({
       id: row.id,
-      originalUrl: row.photo_url,
-      fullUrl: `${baseUrl}${row.photo_url.startsWith('/') ? '' : '/'}${row.photo_url}`,
-      exists: fs.existsSync(path.join(uploadsDir, path.basename(row.photo_url)))
+      hasPhotoData: !!row.photo_data,
+      photoDataLength: row.photo_data ? row.photo_data.length : 0,
+      photoDataPreview: row.photo_data ? row.photo_data.substring(0, 100) + '...' : null
     }));
     
-    res.json({
-      uploadsDir,
-      photos,
-      headers: {
-        host: req.get('host'),
-        forwardedHost: req.headers['x-forwarded-host'],
-        forwardedProto: req.headers['x-forwarded-proto']
-      }
-    });
+    res.json({ photos });
   });
 });
 
@@ -523,7 +442,7 @@ app.use((req, res, next) => {
 // Start the server
 app.listen(PORT, () => {
   // Updated timestamp
-  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 14:56:17`);
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 15:01:25`);
   console.log(`Current User's Login: Azonix07`);
   console.log(`🚀 Unified server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
