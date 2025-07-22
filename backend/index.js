@@ -80,36 +80,13 @@ function initializeDatabase() {
     minutes INTEGER,
     method TEXT,
     user TEXT DEFAULT 'Azonix07',
-    paid_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    paid_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    photo_data TEXT
   )`, function(err) {
     if (err) {
       return console.error("Error creating payments table:", err.message);
     }
-    console.log("Basic payments table ready.");
-    
-    // Now check if the photo_data column exists in the payments table
-    db.all("PRAGMA table_info(payments)", [], function(err, columns) {
-      if (err) {
-        return console.error("Error checking payments table columns:", err.message);
-      }
-      
-      // Look for photo_data column
-      const hasPhotoData = columns.some(col => col.name === 'photo_data');
-      
-      if (!hasPhotoData) {
-        // Add photo_data column to existing table
-        console.log("Adding photo_data column to payments table");
-        db.run("ALTER TABLE payments ADD COLUMN photo_data TEXT", function(err) {
-          if (err) {
-            console.error("Error adding photo_data column:", err.message);
-          } else {
-            console.log("photo_data column added successfully");
-          }
-        });
-      } else {
-        console.log("photo_data column already exists in payments table");
-      }
-    });
+    console.log("Payments table with photo_data column ready.");
   });
 }
 
@@ -117,13 +94,18 @@ function initializeDatabase() {
 function ensureDataUrlFormat(photoData) {
   if (!photoData) return null;
   
-  // If it's already a valid data URL, return it as is
-  if (photoData.startsWith('data:image')) {
-    return photoData;
+  try {
+    // If it's already a valid data URL, return it as is
+    if (typeof photoData === 'string' && photoData.startsWith('data:image')) {
+      return photoData;
+    }
+    
+    // Otherwise, assume it's a raw base64 string and add the prefix
+    return `data:image/jpeg;base64,${photoData}`;
+  } catch (err) {
+    console.error("Error formatting photo data:", err);
+    return null;
   }
-  
-  // Otherwise, assume it's a raw base64 string and add the prefix
-  return `data:image/jpeg;base64,${photoData}`;
 }
 
 // Try to initialize the database tables
@@ -216,7 +198,13 @@ app.post('/api/book', (req, res) => {
 app.post('/api/pay', (req, res) => {
   const { console, minutes, method, photoData } = req.body;
   
-  console.log('Payment request received:', { console, minutes, method, hasPhoto: !!photoData });
+  console.log('Payment request received:', { 
+    console, 
+    minutes, 
+    method, 
+    hasPhoto: !!photoData, 
+    photoDataLength: photoData ? photoData.length : 0 
+  });
   
   // Convert minutes to a number if it's a string
   const minutesNumber = parseInt(minutes, 10);
@@ -241,116 +229,88 @@ app.post('/api/pay', (req, res) => {
   let formattedPhotoData = null;
   if (photoData) {
     formattedPhotoData = ensureDataUrlFormat(photoData);
+    console.log("Photo data formatted:", formattedPhotoData ? "Success" : "Failed");
   }
   
   // Process payment with the properly formatted photoData
   processPaymentWithBase64(console, minutesNumber, method, formattedPhotoData, res);
 });
 
-// Helper function to process payment and update database with Base64 photo
+// Fixed helper function to process payment and update database with Base64 photo
 function processPaymentWithBase64(console, minutes, method, photoData, res) {
-  // Check if photo_data column exists first
-  db.get("PRAGMA table_info(payments)", [], function(err, columns) {
+  // Always use photo_data column - we create it by default in initializeDatabase
+  const sql = 'INSERT INTO payments (console, minutes, method, user, photo_data) VALUES (?, ?, ?, ?, ?)';
+  const params = [console, minutes, method, 'Azonix07', photoData || null];
+  
+  // Insert payment record
+  db.run(sql, params, function(err) {
     if (err) {
-      console.error("Error checking table info:", err.message);
+      console.error("Database error during payment:", err.message);
       return res.status(500).json({ error: `Database error: ${err.message}` });
     }
     
-    // Set up the SQL based on whether photo_data column exists
-    let sql, params;
+    console.log(`Payment processed successfully: ID=${this.lastID}, console="${console}", minutes=${minutes}, method="${method}", photoDataSaved=${photoData ? 'Yes' : 'No'}`);
     
-    // Check if columns is an array with items
-    if (Array.isArray(columns) && columns.some(col => col.name === 'photo_data')) {
-      // Photo_data column exists, use it
-      sql = 'INSERT INTO payments (console, minutes, method, user, photo_data) VALUES (?, ?, ?, ?, ?)';
-      params = [console, minutes, method, 'Azonix07', photoData || null];
-    } else {
-      // Fall back to not using photo_data
-      sql = 'INSERT INTO payments (console, minutes, method, user) VALUES (?, ?, ?, ?)';
-      params = [console, minutes, method, 'Azonix07'];
-    }
+    // Book the console
+    const endTime = Date.now() + minutes * 60 * 1000;
     
-    // Insert payment record
-    db.run(sql, params, function(err) {
-      if (err) {
-        console.error("Database error during payment:", err.message);
-        return res.status(500).json({ error: `Database error: ${err.message}` });
-      }
-      
-      console.log(`Payment processed successfully: ID=${this.lastID}, console="${console}", minutes=${minutes}, method="${method}", photo=${photoData ? 'Yes' : 'No'}`);
-      
-      // Book the console
-      const endTime = Date.now() + minutes * 60 * 1000;
-      
-      db.run(
-        'UPDATE ps5_consoles SET booked = 1, end_time = ? WHERE name = ?',
-        [endTime, console],
-        function(err) {
-          if (err) {
-            console.error("Error updating console status after payment:", err.message);
-            // Payment was successful even if booking fails
-          } else {
-            console.log(`Console "${console}" marked as booked until ${new Date(endTime).toISOString()}`);
-          }
-          
-          // Return success even if booking update failed
-          res.json({ 
-            success: true,
-            message: "Payment processed successfully",
-            paymentId: this.lastID,
-            timestamp: new Date().toISOString(),
-            photoUrl: photoData ? true : false
-          });
+    db.run(
+      'UPDATE ps5_consoles SET booked = 1, end_time = ? WHERE name = ?',
+      [endTime, console],
+      function(err) {
+        if (err) {
+          console.error("Error updating console status after payment:", err.message);
+          // Payment was successful even if booking fails
+        } else {
+          console.log(`Console "${console}" marked as booked until ${new Date(endTime).toISOString()}`);
         }
-      );
-    });
+        
+        // Return success even if booking update failed
+        res.json({ 
+          success: true,
+          message: "Payment processed successfully",
+          paymentId: this.lastID,
+          timestamp: new Date().toISOString(),
+          photoUrl: photoData ? true : false
+        });
+      }
+    );
   });
 }
 
-// Enhanced payments endpoint with compatibility for both photoData and photoUrl
+// Enhanced payments endpoint
 app.get('/api/payments', (req, res) => {
-  // First check if photo_data column exists
-  db.all("PRAGMA table_info(payments)", [], function(err, columns) {
+  db.all('SELECT id, console, minutes, method, user, paid_at, photo_data FROM payments ORDER BY paid_at DESC', [], (err, rows) => {
     if (err) {
-      console.error("Error checking table info:", err.message);
-      return res.status(500).json({ error: 'Failed to check payments table schema' });
+      console.error("Error fetching payments:", err.message);
+      return res.status(500).json({ error: 'Failed to fetch payment history' });
     }
     
-    // Check if photo_data column exists
-    const hasPhotoData = Array.isArray(columns) && columns.some(col => col.name === 'photo_data');
+    console.log(`Retrieved ${rows.length} payment records`);
     
-    // Choose the appropriate query based on schema
-    const query = hasPhotoData 
-      ? 'SELECT id, console, minutes, method, user, paid_at, photo_data FROM payments ORDER BY paid_at DESC'
-      : 'SELECT id, console, minutes, method, user, paid_at FROM payments ORDER BY paid_at DESC';
-    
-    db.all(query, [], (err, rows) => {
-      if (err) {
-        console.error("Error fetching payments:", err.message);
-        return res.status(500).json({ error: 'Failed to fetch payment history' });
-      }
+    const payments = rows.map(row => {
+      // Format the photo data if it exists
+      const formattedPhotoData = row.photo_data ? ensureDataUrlFormat(row.photo_data) : null;
       
-      const payments = rows.map(row => {
-        // Format the photo data if it exists
-        const formattedPhotoData = row.photo_data ? ensureDataUrlFormat(row.photo_data) : null;
-        
-        return {
-          ...row,
-          // Return both photoUrl and photoData for compatibility
-          photoUrl: formattedPhotoData,
-          photoData: formattedPhotoData
-        };
-      });
+      // Log payment info with photo status
+      console.log(`Payment ID ${row.id} photo status: ${row.photo_data ? 'Has photo data' : 'No photo'}`);
       
-      res.json(payments);
+      return {
+        ...row,
+        // Return both photoUrl and photoData for compatibility
+        photoUrl: formattedPhotoData,
+        photoData: formattedPhotoData
+      };
     });
+    
+    res.json(payments);
   });
 });
 
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
   // Updated timestamp
-  const currentDate = "2025-07-22 17:53:51";
+  const currentDate = "2025-07-22 18:02:26";
   const currentUser = 'Azonix07';
   
   res.json({
@@ -391,6 +351,40 @@ app.get('/api/debug/tables', (req, res) => {
           });
         }
       });
+    });
+  });
+});
+
+// Debug endpoint to check payment data including photo data
+app.get('/api/debug/payment/:id', (req, res) => {
+  const paymentId = req.params.id;
+  
+  if (!paymentId) {
+    return res.status(400).json({ error: 'Missing payment ID' });
+  }
+  
+  db.get('SELECT * FROM payments WHERE id = ?', [paymentId], (err, row) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    
+    if (!row) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+    
+    // Return info about the photo data but not the full data
+    res.json({
+      payment: {
+        id: row.id,
+        console: row.console,
+        minutes: row.minutes,
+        method: row.method,
+        user: row.user,
+        paid_at: row.paid_at,
+        hasPhotoData: !!row.photo_data,
+        photoDataLength: row.photo_data ? row.photo_data.length : 0,
+        photoDataPrefix: row.photo_data ? row.photo_data.substring(0, 50) + '...' : null
+      }
     });
   });
 });
@@ -483,7 +477,7 @@ app.use((req, res, next) => {
 // Start the server
 app.listen(PORT, () => {
   // Updated timestamp
-  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 17:53:51`);
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 18:02:26`);
   console.log(`Current User's Login: Azonix07`);
   console.log(`🚀 Unified server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
