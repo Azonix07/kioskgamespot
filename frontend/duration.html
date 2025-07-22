@@ -409,7 +409,6 @@
   </style>
 </head>
 <body>
-  <!-- Header Bar with Date and User -->
  
   
   <div class="main-container">
@@ -438,19 +437,15 @@
       <div class="price-summary" id="priceSummary">
         <div class="summary-row">
           <div class="summary-label">Duration:</div>
-          <div class="summary-value" id="summaryDuration">30 minutes</div>
+          <div class="summary-value" id="summaryDuration">30 min</div>
         </div>
         <div class="summary-row">
-          <div class="summary-label">Base Rate:</div>
-          <div class="summary-value" id="summaryBaseRate">₹150</div>
-        </div>
-        <div class="summary-row">
-          <div class="summary-label">Controllers:</div>
-          <div class="summary-value" id="summaryControllers">1 × ₹50</div>
+          <div class="summary-label">Players:</div>
+          <div class="summary-value" id="summaryPlayers">1 Player</div>
         </div>
         <div class="summary-row total">
           <div class="summary-label">Total:</div>
-          <div class="summary-value" id="summaryTotal">₹200</div>
+          <div class="summary-value" id="summaryTotal">₹70</div>
         </div>
       </div>
       
@@ -477,18 +472,25 @@
       document.getElementById('consoleName').textContent = selectedConsole;
     }
 
-    // Duration and pricing data (in Rupees)
+    // Updated pricing structure based on duration and number of players
+    const pricingMatrix = {
+      30: { 1: 70, 2: 90, 4: 150 },
+      60: { 1: 130, 2: 150, 4: 210 },
+      90: { 1: 170, 2: 200, 4: 270 },
+      120: { 1: 210, 2: 240, 4: 300 }
+    };
+
+    // Duration data with formatted display names
     const durationPricing = [
-      { minutes: 30, price: 150, perMinute: 5 },
-      { minutes: 60, price: 250, perMinute: 4.17 },
-      { minutes: 90, price: 350, perMinute: 3.89 },
-      { minutes: 120, price: 400, perMinute: 3.33, bestValue: true }
+      { minutes: 30, display: "30 min", bestValue: false },
+      { minutes: 60, display: "1 hour", bestValue: false },
+      { minutes: 90, display: "1.5 hour", bestValue: false },
+      { minutes: 120, display: "2 hour", bestValue: true }
     ];
 
     // Global state
     let selectedDuration = null;
     let selectedControllers = null;
-    const controllerPrice = 50; // ₹50 per controller
 
     // Populate duration options
     function loadDurations() {
@@ -499,24 +501,25 @@
         const box = document.createElement('div');
         box.className = 'duration-box';
         box.setAttribute('data-minutes', item.minutes);
-        box.setAttribute('data-price', item.price);
         
-        // Create time element
+        // Create time element with proper display format
         const timeEl = document.createElement('div');
         timeEl.className = 'duration-time';
-        timeEl.textContent = `${item.minutes} min`;
+        timeEl.textContent = item.display;
         box.appendChild(timeEl);
         
-        // Create price element
+        // Create price element - show only 1P price initially
         const priceEl = document.createElement('div');
         priceEl.className = 'duration-price';
-        priceEl.textContent = `₹${item.price}`;
+        priceEl.textContent = `₹${pricingMatrix[item.minutes][1]}`; // Show 1P price
+        priceEl.id = `price-${item.minutes}`;
         box.appendChild(priceEl);
         
         // Create price details element
         const detailsEl = document.createElement('div');
         detailsEl.className = 'price-details';
-        detailsEl.textContent = `₹${item.perMinute.toFixed(2)}/min`;
+        detailsEl.textContent = `1 Player`;
+        detailsEl.id = `details-${item.minutes}`;
         box.appendChild(detailsEl);
         
         // Add best value badge if applicable
@@ -539,13 +542,22 @@
         [1, 2, 4].forEach(count => {
           const controllerOption = document.createElement('div');
           controllerOption.className = 'controller-option';
+          if (count === 1) controllerOption.classList.add('selected'); // Auto-select 1P
           controllerOption.setAttribute('data-controllers', count);
           controllerOption.textContent = `${count}P`;
           
           // Add click handler for controller selection
           controllerOption.onclick = (e) => {
             e.stopPropagation(); // Prevent triggering parent click
-            selectControllers(count, item.minutes, item.price);
+            selectControllers(count, item.minutes);
+            
+            // Update the price on the duration button
+            const priceElement = document.getElementById(`price-${item.minutes}`);
+            const detailsElement = document.getElementById(`details-${item.minutes}`);
+            if (priceElement) {
+              priceElement.textContent = `₹${pricingMatrix[item.minutes][count]}`;
+              detailsElement.textContent = `${count} Player${count > 1 ? 's' : ''}`;
+            }
           };
           
           controllerOptions.appendChild(controllerOption);
@@ -555,16 +567,16 @@
         box.appendChild(controllerContainer);
         
         // Attach click handler for duration selection
-        box.onclick = () => selectDuration(item.minutes, item.price, box);
+        box.onclick = () => selectDuration(item.minutes, box);
         
         options.appendChild(box);
       });
     }
 
     // Select duration
-    function selectDuration(minutes, price, clickedBox) {
-      selectedDuration = { minutes, price };
-      selectedControllers = null; // Reset controller selection
+    function selectDuration(minutes, clickedBox) {
+      selectedDuration = minutes;
+      selectedControllers = 1; // Auto-select 1P by default
       
       // Get duration options container
       const durationOptions = document.getElementById('durationOptions');
@@ -577,6 +589,16 @@
       durationBoxes.forEach(box => {
         if (box === clickedBox) {
           box.classList.add('selected');
+          
+          // Auto-select 1P when selecting duration
+          const controllerOptions = box.querySelectorAll('.controller-option');
+          controllerOptions.forEach(option => {
+            if (parseInt(option.getAttribute('data-controllers')) === 1) {
+              option.classList.add('selected');
+            } else {
+              option.classList.remove('selected');
+            }
+          });
         } else {
           box.classList.remove('selected');
           
@@ -586,14 +608,19 @@
         }
       });
       
-      // Hide summary container if visible and show fixed back button
-      document.getElementById('summaryContainer').classList.remove('visible');
-      document.getElementById('selectionsContainer').classList.remove('shifted');
-      document.getElementById('fixedBackButton').classList.remove('faded');
+      // Update summary since we auto-selected 1P
+      updateSummary();
+      
+      // Show summary container after a brief delay
+      setTimeout(() => {
+        document.getElementById('summaryContainer').classList.add('visible');
+        document.getElementById('selectionsContainer').classList.add('shifted');
+        document.getElementById('fixedBackButton').classList.add('faded');
+      }, 200);
     }
 
     // Select number of controllers
-    function selectControllers(count, minutes, price) {
+    function selectControllers(count, minutes) {
       selectedControllers = count;
       
       // Find the selected duration box
@@ -611,29 +638,22 @@
       
       // Update price summary
       updateSummary();
-      
-      // Animate to show summary on right and fade out the fixed back button
-      document.getElementById('selectionsContainer').classList.add('shifted');
-      document.getElementById('fixedBackButton').classList.add('faded');
-      
-      // Show summary container after a brief delay (for better animation flow)
-      setTimeout(() => {
-        document.getElementById('summaryContainer').classList.add('visible');
-      }, 200);
     }
 
-    // Update price summary
+    // Update price summary based on selected duration and controllers
     function updateSummary() {
       if (!selectedDuration || !selectedControllers) return;
       
-      const controllers = selectedControllers || 0;
-      const controllerCost = controllers * controllerPrice;
-      const totalCost = selectedDuration.price + controllerCost;
+      // Get the price from our pricing matrix
+      const price = pricingMatrix[selectedDuration][selectedControllers];
       
-      document.getElementById('summaryDuration').textContent = `${selectedDuration.minutes} minutes`;
-      document.getElementById('summaryBaseRate').textContent = `₹${selectedDuration.price}`;
-      document.getElementById('summaryControllers').textContent = `${controllers} × ₹${controllerPrice}`;
-      document.getElementById('summaryTotal').textContent = `₹${totalCost}`;
+      // Get the display format for the selected duration
+      const durationDisplay = durationPricing.find(d => d.minutes === selectedDuration).display;
+      
+      // Update summary elements
+      document.getElementById('summaryDuration').textContent = durationDisplay;
+      document.getElementById('summaryPlayers').textContent = `${selectedControllers} Player${selectedControllers > 1 ? 's' : ''}`;
+      document.getElementById('summaryTotal').textContent = `₹${price}`;
     }
 
     // Redirect to payment page
@@ -643,12 +663,15 @@
         return;
       }
       
-      // Save the selected duration, price, and controllers to localStorage
-      localStorage.setItem('selectedDuration', selectedDuration.minutes);
-      localStorage.setItem('selectedPrice', selectedDuration.price);
+      // Get the final price from our pricing matrix
+      const finalPrice = pricingMatrix[selectedDuration][selectedControllers];
+      
+      // Save the selected duration, controllers, and price to localStorage
+      localStorage.setItem('selectedDuration', selectedDuration);
+      localStorage.setItem('selectedPrice', finalPrice);
       localStorage.setItem('selectedControllers', selectedControllers);
-      localStorage.setItem('controllerPrice', controllerPrice);
-      localStorage.setItem('totalPrice', selectedDuration.price + (selectedControllers * controllerPrice));
+      localStorage.setItem('controllerPrice', 0); // We're not using per-controller pricing anymore
+      localStorage.setItem('totalPrice', finalPrice);
 
       // Redirect to payment page
       window.location.href = 'payment.html';

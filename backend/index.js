@@ -4,6 +4,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 
+
 // Restore `console.log` if overridden
 console.log = console.log || ((...args) => process.stdout.write(args.join(' ') + '\n'));
 

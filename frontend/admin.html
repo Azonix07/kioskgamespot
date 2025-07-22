@@ -558,6 +558,12 @@
       background-color: #9C27B0;
       color: white;
     }
+    
+    /* Amount highlighting */
+    .amount-cell {
+      font-weight: 700;
+      color: #4CAF50;
+    }
 
     /* Responsive Adjustments */
     @media (max-width: 768px) {
@@ -615,7 +621,7 @@
 <body>
   <!-- Header Bar -->
   <div class="header-bar">
-    <div id="current-date">Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-19 14:40:20</div>
+    <div id="current-date">Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 09:04:15</div>
     <div id="current-user">Current User's Login: Azonix07</div>
   </div>
 
@@ -681,7 +687,8 @@
     // Update current date and time in UTC format with exact format requested
     function updateDateTime() {
       // Display static date/time as requested
-      document.getElementById('current-date').textContent = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-19 14:40:20";
+      document.getElementById('current-date').textContent = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 09:04:15";
+      document.getElementById('current-user').textContent = "Current User's Login: Azonix07";
     }
 
     // Initialize date/time
@@ -846,7 +853,7 @@
       }
     }
     
-    // NEW: Get payment history from localStorage
+    // Get payment history from localStorage
     function getPaymentHistory() {
       const historyJSON = localStorage.getItem('paymentHistory');
       if (!historyJSON) {
@@ -861,13 +868,16 @@
       }
     }
     
-    // NEW: Move a booking to payment history when it expires
+    // Move a booking to payment history when it expires
     function moveBookingToPaymentHistory(booking) {
       // Skip admin controlled devices
       if (booking.adminControl) return;
       
       // Get existing payment history
       let history = getPaymentHistory();
+      
+      // Get amount from booking or calculate based on current pricing matrix
+      const amount = booking.amount || calculateAmount(booking.minutes, booking.players || booking.controllers || 1);
       
       // Create payment record from booking
       const payment = {
@@ -876,6 +886,8 @@
         minutes: booking.minutes,
         method: booking.method || 'Unknown',
         user: 'Azonix07',
+        players: booking.players || booking.controllers || 1,
+        amount: amount,
         paid_at: new Date(booking.endTime - (booking.minutes * 60 * 1000)).toISOString(),
         completed_at: new Date().toISOString(),
         source: 'local'
@@ -896,7 +908,26 @@
       movePhotoToPaymentHistory(booking, payment.id);
     }
     
-    // NEW: Move photo to payment history
+    // Calculate amount based on duration and players using the new pricing matrix
+    function calculateAmount(minutes, players) {
+      // Define the pricing matrix
+      const pricingMatrix = {
+        30: { 1: 70, 2: 90, 4: 150 },
+        60: { 1: 130, 2: 150, 4: 210 },
+        90: { 1: 170, 2: 200, 4: 270 },
+        120: { 1: 210, 2: 240, 4: 300 }
+      };
+      
+      // Get the price based on duration and players
+      if (pricingMatrix[minutes] && pricingMatrix[minutes][players]) {
+        return pricingMatrix[minutes][players];
+      }
+      
+      // Default fallback calculation
+      return minutes * 2 + (players * 10);
+    }
+    
+    // Move photo to payment history
     function movePhotoToPaymentHistory(booking, paymentId) {
       const photosJSON = localStorage.getItem('userPhotos');
       if (!photosJSON) return;
@@ -928,7 +959,7 @@
       }
     }
     
-    // NEW: Move an expired booking to history by console name
+    // Move an expired booking to history by console name
     function moveExpiredBookingToHistory(consoleName) {
       const bookings = getLocalBookings();
       const booking = bookings.find(b => b.console === consoleName);
@@ -1237,7 +1268,7 @@
       document.getElementById('photoModal').style.display = 'none';
     }
 
-    // Fetch and display all payments - Enhanced to include payment history
+    // Fetch and display all payments - Enhanced to include payment history and amount
     async function fetchPayments() {
       const adminData = document.getElementById('adminData');
       adminData.innerHTML = '<div style="text-align: center; padding: 20px;">Loading payment data...<div class="loading" style="margin: 10px auto; display: block;"></div></div>';
@@ -1249,7 +1280,7 @@
         if (response.ok) {
           serverPayments = await response.json();
           // Add source indicator
-          serverPayments = serverPayments.map(p => ({...p, source: 'server'}));
+          serverPayments = serverPayments.map(p => ({...p, source: 'server', amount: p.amount || calculateAmount(p.minutes, p.players || 1)}));
         } else {
           console.error('Failed to fetch server payments');
         }
@@ -1267,6 +1298,8 @@
         const localPayments = localBookings.map((booking, index) => {
           const bookingId = `${booking.console}-${booking.endTime}`;
           const photoData = storedPhotos[bookingId];
+          const players = booking.players || booking.controllers || 1;
+          const amount = booking.amount || calculateAmount(booking.minutes, players);
           
           return {
             id: `local-${index + 1}`,
@@ -1274,6 +1307,8 @@
             minutes: booking.minutes,
             method: booking.method || 'Unknown',
             user: 'Azonix07',
+            players: players,
+            amount: amount,
             paid_at: new Date(booking.endTime - (booking.minutes * 60 * 1000)).toISOString(),
             source: 'local',
             photoData: photoData, // Store the base64 image directly
@@ -1286,10 +1321,14 @@
           // Try to find a photo for this payment
           const photoData = storedPhotos[payment.id];
           
+          // Ensure amount is present
+          const amount = payment.amount || calculateAmount(payment.minutes, payment.players || payment.controllers || 1);
+          
           return {
             ...payment,
             photoData: photoData,
-            active: false
+            active: false,
+            amount: amount
           };
         });
 
@@ -1361,7 +1400,7 @@
       document.querySelector(`.payment-tab[onclick="switchTab('${tabId}')"]`).classList.add('active');
     }
     
-    // Create payment table HTML with user photos
+    // Create payment table HTML with user photos and amount
     function createPaymentTable(payments, includePhotos = false) {
       if (payments.length === 0) {
         return '<div style="text-align: center; padding: 20px;">No payment records found</div>';
@@ -1377,6 +1416,8 @@
       tableHtml += '<th>ID</th>';
       tableHtml += '<th>Device</th>';
       tableHtml += '<th>Minutes</th>';
+      tableHtml += '<th>Players</th>';
+      tableHtml += '<th>Amount</th>';
       tableHtml += '<th>Method</th>';
       tableHtml += '<th>Time</th>';
       tableHtml += '<th>Source</th>';
@@ -1412,9 +1453,14 @@
           }
         }
         
+        // Get the number of players/controllers
+        const players = p.players || p.controllers || 1;
+        
         tableHtml += `<td>${p.id}</td>`;
         tableHtml += `<td>${p.console}</td>`;
         tableHtml += `<td>${p.minutes}</td>`;
+        tableHtml += `<td>${players}</td>`;
+        tableHtml += `<td class="amount-cell">₹${p.amount || calculateAmount(p.minutes, players)}</td>`;
         tableHtml += `<td>${p.method || 'Unknown'}</td>`;
         tableHtml += `<td>${formatDateTime(p.paid_at)}</td>`;
         tableHtml += `<td>
