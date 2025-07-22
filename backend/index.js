@@ -128,7 +128,11 @@ if (fs.existsSync(frontendDir)) {
 }
 
 // Then serve static files from public directory as a fallback
-app.use(express.static(path.join(__dirname, 'public')));
+const publicDir = path.join(__dirname, 'public');
+if (fs.existsSync(publicDir)) {
+  console.log(`Serving public files as fallback from: ${publicDir}`);
+  app.use(express.static(publicDir));
+}
 
 // Log all API requests
 app.use('/api', (req, res, next) => {
@@ -316,7 +320,8 @@ app.get('/api/payments', (req, res) => {
 
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
-  const currentDate = "2025-07-22 13:58:04";
+  // Updated timestamp
+  const currentDate = "2025-07-22 14:29:18";
   const currentUser = 'Azonix07';
   
   res.json({
@@ -412,33 +417,40 @@ app.post('/api/reset-single', (req, res) => {
   }
 });
 
-// Fixed: Properly handle client-side routing for frontend
-app.get('*', (req, res, next) => {
-  // Skip API routes and file extensions
-  if (req.path.startsWith('/api') || req.path.match(/\.[a-zA-Z0-9]+$/)) {
+// FIXED: Use middleware instead of route handler to avoid path-to-regexp issues
+// This avoids the problematic '/*' pattern that causes the error
+app.use((req, res, next) => {
+  // Skip API routes, static files, and files with extensions
+  if (req.path.startsWith('/api') || req.path.indexOf('.') !== -1) {
     return next();
   }
   
-  // Try to send index.html from frontend directory first
-  const frontendIndexPath = path.join(__dirname, 'frontend', 'index.html');
-  if (fs.existsSync(frontendIndexPath)) {
-    return res.sendFile(frontendIndexPath);
+  try {
+    // Try to send index.html from frontend directory first
+    const frontendIndexPath = path.join(__dirname, 'frontend', 'index.html');
+    if (fs.existsSync(frontendIndexPath)) {
+      return res.sendFile(frontendIndexPath);
+    }
+    
+    // Fall back to public directory if frontend index.html doesn't exist
+    const publicIndexPath = path.join(__dirname, 'public', 'index.html');
+    if (fs.existsSync(publicIndexPath)) {
+      return res.sendFile(publicIndexPath);
+    }
+    
+    // If neither exists, return a 404
+    res.status(404).send('Cannot find application entry point (index.html)');
+  } catch (error) {
+    console.error("Error serving index.html:", error);
+    res.status(500).send('Server error when trying to serve the application');
   }
-  
-  // Fall back to public directory if frontend index.html doesn't exist
-  const publicIndexPath = path.join(__dirname, 'public', 'index.html');
-  if (fs.existsSync(publicIndexPath)) {
-    return res.sendFile(publicIndexPath);
-  }
-  
-  // If neither exists, return a 404
-  res.status(404).send('Cannot find application entry point (index.html)');
 });
 
 // Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 13:58:04`);
+  // Updated timestamp
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 14:29:18`);
   console.log(`Current User's Login: Azonix07`);
   console.log(`🚀 Unified server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
