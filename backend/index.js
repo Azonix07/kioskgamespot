@@ -63,7 +63,7 @@ function initializeDatabase() {
       // Add default consoles if none exist
       if (row && row.count === 0) {
         console.log("Adding default PS5 consoles...");
-        const defaultConsoles = ['PS5 #1', 'PS5 #2', 'PS5 #3', 'PS5 #4'];
+        const defaultConsoles = ['PS5 #1', 'PS5 #2', 'PS5 #3', 'PS5 #4', 'Logitech G920'];
         defaultConsoles.forEach(name => {
           db.run('INSERT INTO ps5_consoles (name, booked) VALUES (?, 0)', [name], function(err) {
             if (err) console.error(`Error adding console ${name}:`, err.message);
@@ -81,28 +81,13 @@ function initializeDatabase() {
     method TEXT,
     user TEXT DEFAULT 'Azonix07',
     paid_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    photo_url TEXT,
     photo_data TEXT
   )`, function(err) {
     if (err) {
       return console.error("Error creating payments table:", err.message);
     }
     console.log("payments table ready.");
-    
-    // Check if we need to migrate from photo_url to photo_data
-    db.get("PRAGMA table_info(payments)", [], function(err, row) {
-      if (err) {
-        return console.error("Error checking payments columns:", err.message);
-      }
-      
-      // If photo_url exists but photo_data doesn't, add photo_data column
-      const columns = row ? [row.name] : [];
-      if (columns.includes('photo_url') && !columns.includes('photo_data')) {
-        console.log("Adding photo_data column to payments table");
-        db.run("ALTER TABLE payments ADD COLUMN photo_data TEXT", function(err) {
-          if (err) console.error("Error adding photo_data column:", err.message);
-        });
-      }
-    });
   });
 }
 
@@ -192,7 +177,7 @@ app.post('/api/book', (req, res) => {
   );
 });
 
-// Enhanced payment endpoint that saves photo as Base64
+// Enhanced payment endpoint that stores photo as Base64
 app.post('/api/pay', (req, res) => {
   const { console, minutes, method, photoData } = req.body;
   
@@ -223,15 +208,9 @@ app.post('/api/pay', (req, res) => {
 
 // Helper function to process payment and update database with Base64 photo
 function processPaymentWithBase64(console, minutes, method, photoData, res) {
-  // SQL query based on whether photo is available
-  const sql = photoData 
-    ? 'INSERT INTO payments (console, minutes, method, user, photo_data) VALUES (?, ?, ?, ?, ?)'
-    : 'INSERT INTO payments (console, minutes, method, user) VALUES (?, ?, ?, ?)';
-  
-  // Parameters based on whether photo is available
-  const params = photoData
-    ? [console, minutes, method, 'Azonix07', photoData]
-    : [console, minutes, method, 'Azonix07'];
+  // SQL query now stores photo data directly in the database
+  const sql = 'INSERT INTO payments (console, minutes, method, user, photo_data) VALUES (?, ?, ?, ?, ?)';
+  const params = [console, minutes, method, 'Azonix07', photoData || null];
   
   // Insert payment record
   db.run(sql, params, function(err) {
@@ -262,14 +241,14 @@ function processPaymentWithBase64(console, minutes, method, photoData, res) {
           message: "Payment processed successfully",
           paymentId: this.lastID,
           timestamp: new Date().toISOString(),
-          photoData: photoData ? true : false
+          photoUrl: photoData ? true : false
         });
       }
     );
   });
 }
 
-// Enhanced payments endpoint to include photos as base64 strings
+// Enhanced payments endpoint with compatibility for both photoData and photoUrl
 app.get('/api/payments', (req, res) => {
   db.all('SELECT id, console, minutes, method, user, paid_at, photo_data FROM payments ORDER BY paid_at DESC', [], (err, rows) => {
     if (err) {
@@ -277,11 +256,14 @@ app.get('/api/payments', (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch payment history' });
     }
     
-    const payments = rows.map(row => ({
-      ...row,
-      // Pass through the base64 data directly
-      photoUrl: row.photo_data ? row.photo_data : null
-    }));
+    const payments = rows.map(row => {
+      // Return photo data in BOTH photoUrl and photoData fields for compatibility
+      return {
+        ...row,
+        photoUrl: row.photo_data || null,
+        photoData: row.photo_data || null
+      };
+    });
     
     res.json(payments);
   });
@@ -290,7 +272,7 @@ app.get('/api/payments', (req, res) => {
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
   // Updated timestamp
-  const currentDate = "2025-07-22 15:01:25";
+  const currentDate = "2025-07-22 15:13:45";
   const currentUser = 'Azonix07';
   
   res.json({
@@ -335,21 +317,31 @@ app.get('/api/debug/tables', (req, res) => {
   });
 });
 
-// Debug endpoint to check photo storage
-app.get('/api/debug/photos', (req, res) => {
-  db.all('SELECT id, photo_data FROM payments WHERE photo_data IS NOT NULL LIMIT 5', [], (err, rows) => {
+// Debug endpoint to check payment data
+app.get('/api/debug/payment/:id', (req, res) => {
+  const paymentId = req.params.id;
+  
+  if (!paymentId) {
+    return res.status(400).json({ error: 'Missing payment ID' });
+  }
+  
+  db.get('SELECT * FROM payments WHERE id = ?', [paymentId], (err, row) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
     
-    const photos = rows.map(row => ({
-      id: row.id,
-      hasPhotoData: !!row.photo_data,
-      photoDataLength: row.photo_data ? row.photo_data.length : 0,
-      photoDataPreview: row.photo_data ? row.photo_data.substring(0, 100) + '...' : null
-    }));
+    if (!row) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
     
-    res.json({ photos });
+    // Return full details including photo data
+    res.json({
+      payment: {
+        ...row,
+        hasPhotoData: !!row.photo_data,
+        photoDataLength: row.photo_data ? row.photo_data.length : 0
+      }
+    });
   });
 });
 
@@ -442,7 +434,7 @@ app.use((req, res, next) => {
 // Start the server
 app.listen(PORT, () => {
   // Updated timestamp
-  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 15:01:25`);
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 15:13:45`);
   console.log(`Current User's Login: Azonix07`);
   console.log(`🚀 Unified server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
