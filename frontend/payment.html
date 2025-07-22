@@ -901,8 +901,8 @@
       }
     });
 
-    // Handle successful payment completion
-    function handleSuccessfulPayment(response, method, amount) {
+    // UPDATED: Handle successful payment completion - Now includes API call to server
+    async function handleSuccessfulPayment(response, method, amount) {
       try {
         // Get payment details
         const consoleName = document.getElementById('selectedConsole').textContent;
@@ -927,8 +927,60 @@
         // Calculate end time for booking
         const endTime = Date.now() + (durationMin * 60 * 1000);
         
+        // Get the photo data URL
+        const photoDataUrl = capturePhoto();
+        if (!photoDataUrl) {
+          console.warn("Failed to capture photo");
+        }
+        
         // Create unique ID for this booking
         const bookingId = `${consoleName}-${endTime}`;
+        
+        // Store the photo locally as before (for local usage)
+        const photosJSON = localStorage.getItem('userPhotos') || '{}';
+        let photos;
+        try {
+          photos = JSON.parse(photosJSON);
+        } catch (e) {
+          photos = {};
+        }
+        photos[bookingId] = photoDataUrl;
+        localStorage.setItem('userPhotos', JSON.stringify(photos));
+        
+        // NEW CODE: Send payment and photo data to backend API
+        try {
+          console.log("Sending payment data to server...");
+          showStatusMessage("Sending payment data to server...", "info");
+          
+          // Send payment and photo data to backend API
+          const apiResponse = await fetch('/api/pay', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              console: consoleName,
+              minutes: durationMin,
+              method: method,
+              photoData: photoDataUrl // Include the photo data in the API request
+            })
+          });
+          
+          if (!apiResponse.ok) {
+            const errorData = await apiResponse.json();
+            throw new Error(`Server error: ${errorData.error || 'Unknown error'}`);
+          }
+          
+          const result = await apiResponse.json();
+          console.log("Server payment response:", result);
+          showStatusMessage("Payment successfully recorded on server", "success");
+          
+        } catch (apiErr) {
+          console.error("API payment error:", apiErr);
+          showStatusMessage(`Server payment processing warning: ${apiErr.message}. Local booking will still work.`, "info");
+          // Continue with local booking even if server API fails
+        }
+        // END NEW CODE
         
         // Store booking in the new multi-booking format
         const newBooking = {
@@ -1002,7 +1054,7 @@
     // Initialize page
     function init() {
       // Store current date and time in a variable
-      const currentDateTime = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 12:44:25";
+      const currentDateTime = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 18:20:20";
       const currentUser = "Current User's Login: Azonix07";
       
       initPaymentDetails();
