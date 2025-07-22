@@ -3,7 +3,6 @@ const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
-const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 
 // Restore `console.log` if overridden
@@ -22,6 +21,10 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection:', reason);
 });
 
+// Check if database exists, if not create it
+const dbExists = fs.existsSync(dbPath);
+console.log(`Database exists at ${dbPath}: ${dbExists}`);
+
 // Initialize database connection with more robust error handling
 console.log(`Attempting to connect to database at: ${dbPath}`);
 let db;
@@ -31,14 +34,17 @@ try {
       console.error(`Database connection error: ${err.message}`);
     } else {
       console.log('Connected to the SQLite database.');
+      // Initialize the database schema
+      initializeDatabase();
     }
   });
 } catch (error) {
   console.error(`Failed to create database connection: ${error.message}`);
   db = new sqlite3.Database(':memory:'); // Fallback to memory database
+  initializeDatabase();
 }
 
-// Initialize the database with payments table
+// Initialize the database with tables including payments with photo_data column
 function initializeDatabase() {
   console.log("Initializing database...");
   
@@ -72,9 +78,74 @@ function initializeDatabase() {
       }
     });
   });
-  
-  // First, ensure the basic payments table exists
-  db.run(`CREATE TABLE IF NOT EXISTS payments (
+
+  // Check if payments table exists and has photo_data column
+  db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='payments'", [], function(err, row) {
+    if (err) {
+      console.error("Error checking payments table:", err.message);
+      return;
+    }
+    
+    if (row) {
+      console.log("Found existing payments table");
+      
+      // Check if photo_data column exists by querying the table structure
+      const tableDefinition = row.sql;
+      console.log("Table definition:", tableDefinition);
+      
+      if (tableDefinition && !tableDefinition.toLowerCase().includes('photo_data')) {
+        console.log("The payments table exists but doesn't have the photo_data column. Backing up and recreating...");
+        
+        // Back up existing data
+        db.all("SELECT id, console, minutes, method, user, paid_at FROM payments", [], function(err, rows) {
+          if (err) {
+            console.error("Error backing up payments data:", err.message);
+            return;
+          }
+          
+          console.log(`Backed up ${rows.length} payment records`);
+          
+          // Drop the existing table
+          db.run("DROP TABLE payments", function(err) {
+            if (err) {
+              console.error("Error dropping payments table:", err.message);
+              return;
+            }
+            
+            console.log("Old payments table dropped successfully");
+            
+            // Create new table with photo_data column
+            createPaymentsTable(function() {
+              // Restore backed up data
+              if (rows.length > 0) {
+                console.log("Restoring payment data...");
+                
+                rows.forEach(row => {
+                  db.run(
+                    "INSERT INTO payments (id, console, minutes, method, user, paid_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    [row.id, row.console, row.minutes, row.method, row.user, row.paid_at],
+                    function(err) {
+                      if (err) console.error("Error restoring payment data:", err.message);
+                    }
+                  );
+                });
+              }
+            });
+          });
+        });
+      } else {
+        console.log("Payments table already includes photo_data column");
+      }
+    } else {
+      console.log("Payments table doesn't exist, creating it...");
+      createPaymentsTable();
+    }
+  });
+}
+
+// Create payments table with photo_data column
+function createPaymentsTable(callback) {
+  db.run(`CREATE TABLE payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     console TEXT,
     minutes INTEGER,
@@ -84,9 +155,13 @@ function initializeDatabase() {
     photo_data TEXT
   )`, function(err) {
     if (err) {
-      return console.error("Error creating payments table:", err.message);
+      console.error("Error creating payments table:", err.message);
+      return;
     }
-    console.log("Payments table with photo_data column ready.");
+    
+    console.log("Created new payments table with photo_data column");
+    
+    if (callback) callback();
   });
 }
 
@@ -107,9 +182,6 @@ function ensureDataUrlFormat(photoData) {
     return null;
   }
 }
-
-// Try to initialize the database tables
-initializeDatabase();
 
 app.use(cors());
 // Increase JSON size limit for base64 encoded images
@@ -233,84 +305,109 @@ app.post('/api/pay', (req, res) => {
   }
   
   // Process payment with the properly formatted photoData
-  processPaymentWithBase64(console, minutesNumber, method, formattedPhotoData, res);
+  processPayment(console, minutesNumber, method, formattedPhotoData, res);
 });
 
-// Fixed helper function to process payment and update database with Base64 photo
-function processPaymentWithBase64(console, minutes, method, photoData, res) {
-  // Always use photo_data column - we create it by default in initializeDatabase
-  const sql = 'INSERT INTO payments (console, minutes, method, user, photo_data) VALUES (?, ?, ?, ?, ?)';
-  const params = [console, minutes, method, 'Azonix07', photoData || null];
-  
-  // Insert payment record
-  db.run(sql, params, function(err) {
-    if (err) {
-      console.error("Database error during payment:", err.message);
-      return res.status(500).json({ error: `Database error: ${err.message}` });
-    }
+// Simplified payment processing function
+function processPayment(console, minutes, method, photoData, res) {
+  // Use a try-catch to handle any unexpected errors
+  try {
+    const sql = 'INSERT INTO payments (console, minutes, method, user, photo_data) VALUES (?, ?, ?, ?, ?)';
+    const params = [console, minutes, method, 'Azonix07', photoData];
     
-    console.log(`Payment processed successfully: ID=${this.lastID}, console="${console}", minutes=${minutes}, method="${method}", photoDataSaved=${photoData ? 'Yes' : 'No'}`);
+    // Log the query and data
+    console.log(`Running SQL: ${sql} with params: [console=${console}, minutes=${minutes}, method=${method}, user=Azonix07, photo_data=${photoData ? '(photo data present)' : 'null'}]`);
     
-    // Book the console
-    const endTime = Date.now() + minutes * 60 * 1000;
-    
-    db.run(
-      'UPDATE ps5_consoles SET booked = 1, end_time = ? WHERE name = ?',
-      [endTime, console],
-      function(err) {
-        if (err) {
-          console.error("Error updating console status after payment:", err.message);
-          // Payment was successful even if booking fails
-        } else {
-          console.log(`Console "${console}" marked as booked until ${new Date(endTime).toISOString()}`);
-        }
-        
-        // Return success even if booking update failed
-        res.json({ 
-          success: true,
-          message: "Payment processed successfully",
-          paymentId: this.lastID,
-          timestamp: new Date().toISOString(),
-          photoUrl: photoData ? true : false
-        });
+    // Insert payment record
+    db.run(sql, params, function(err) {
+      if (err) {
+        console.error("Database error during payment:", err.message);
+        return res.status(500).json({ error: `Database error: ${err.message}` });
       }
-    );
-  });
+      
+      console.log(`Payment processed successfully: ID=${this.lastID}, console="${console}", minutes=${minutes}, method="${method}"`);
+      
+      // Book the console
+      const endTime = Date.now() + minutes * 60 * 1000;
+      
+      db.run(
+        'UPDATE ps5_consoles SET booked = 1, end_time = ? WHERE name = ?',
+        [endTime, console],
+        function(err) {
+          if (err) {
+            console.error("Error updating console status after payment:", err.message);
+            // Payment was successful even if booking fails
+          } else {
+            console.log(`Console "${console}" marked as booked until ${new Date(endTime).toISOString()}`);
+          }
+          
+          // Return success even if booking update failed
+          res.json({ 
+            success: true,
+            message: "Payment processed successfully",
+            paymentId: this.lastID,
+            timestamp: new Date().toISOString(),
+            photoSaved: photoData ? true : false
+          });
+        }
+      );
+    });
+  } catch (error) {
+    console.error("Unexpected error in processPayment:", error);
+    return res.status(500).json({ error: 'An unexpected error occurred processing the payment' });
+  }
 }
 
-// Enhanced payments endpoint
+// Safe payments endpoint with fallback if column doesn't exist
 app.get('/api/payments', (req, res) => {
-  db.all('SELECT id, console, minutes, method, user, paid_at, photo_data FROM payments ORDER BY paid_at DESC', [], (err, rows) => {
+  // First check if photo_data column exists before querying
+  db.all("PRAGMA table_info(payments)", [], function(err, columns) {
     if (err) {
-      console.error("Error fetching payments:", err.message);
-      return res.status(500).json({ error: 'Failed to fetch payment history' });
+      console.error("Error checking table info:", err.message);
+      return res.status(500).json({ error: 'Failed to check payments table schema' });
     }
     
-    console.log(`Retrieved ${rows.length} payment records`);
+    // Check if photo_data column exists in the columns array
+    const hasPhotoData = columns.some(col => col.name === 'photo_data');
+    console.log("Payments table has photo_data column:", hasPhotoData);
     
-    const payments = rows.map(row => {
-      // Format the photo data if it exists
-      const formattedPhotoData = row.photo_data ? ensureDataUrlFormat(row.photo_data) : null;
+    let query;
+    if (hasPhotoData) {
+      query = 'SELECT id, console, minutes, method, user, paid_at, photo_data FROM payments ORDER BY paid_at DESC';
+    } else {
+      query = 'SELECT id, console, minutes, method, user, paid_at FROM payments ORDER BY paid_at DESC';
+    }
+    
+    // Now we can safely execute the query
+    db.all(query, [], (err, rows) => {
+      if (err) {
+        console.error("Error fetching payments:", err.message);
+        return res.status(500).json({ error: 'Failed to fetch payment history' });
+      }
       
-      // Log payment info with photo status
-      console.log(`Payment ID ${row.id} photo status: ${row.photo_data ? 'Has photo data' : 'No photo'}`);
+      console.log(`Retrieved ${rows.length} payment records`);
       
-      return {
-        ...row,
-        // Return both photoUrl and photoData for compatibility
-        photoUrl: formattedPhotoData,
-        photoData: formattedPhotoData
-      };
+      const payments = rows.map(row => {
+        // Format the photo data if it exists and we have the column
+        const formattedPhotoData = hasPhotoData && row.photo_data ? ensureDataUrlFormat(row.photo_data) : null;
+        
+        return {
+          ...row,
+          // Return both photoUrl and photoData for compatibility
+          photoUrl: formattedPhotoData,
+          photoData: formattedPhotoData
+        };
+      });
+      
+      res.json(payments);
     });
-    
-    res.json(payments);
   });
 });
 
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
   // Updated timestamp
-  const currentDate = "2025-07-22 18:02:26";
+  const currentDate = "2025-07-22 18:08:31";
   const currentUser = 'Azonix07';
   
   res.json({
@@ -347,44 +444,12 @@ app.get('/api/debug/tables', (req, res) => {
         if (completedTables === tables.length) {
           res.json({ 
             tables: tables.map(t => t.name),
-            schema: tableData 
+            schema: tableData,
+            dbPath: dbPath,
+            dbExists: fs.existsSync(dbPath)
           });
         }
       });
-    });
-  });
-});
-
-// Debug endpoint to check payment data including photo data
-app.get('/api/debug/payment/:id', (req, res) => {
-  const paymentId = req.params.id;
-  
-  if (!paymentId) {
-    return res.status(400).json({ error: 'Missing payment ID' });
-  }
-  
-  db.get('SELECT * FROM payments WHERE id = ?', [paymentId], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    
-    if (!row) {
-      return res.status(404).json({ error: 'Payment not found' });
-    }
-    
-    // Return info about the photo data but not the full data
-    res.json({
-      payment: {
-        id: row.id,
-        console: row.console,
-        minutes: row.minutes,
-        method: row.method,
-        user: row.user,
-        paid_at: row.paid_at,
-        hasPhotoData: !!row.photo_data,
-        photoDataLength: row.photo_data ? row.photo_data.length : 0,
-        photoDataPrefix: row.photo_data ? row.photo_data.substring(0, 50) + '...' : null
-      }
     });
   });
 });
@@ -477,7 +542,7 @@ app.use((req, res, next) => {
 // Start the server
 app.listen(PORT, () => {
   // Updated timestamp
-  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 18:02:26`);
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 18:08:31`);
   console.log(`Current User's Login: Azonix07`);
   console.log(`🚀 Unified server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
