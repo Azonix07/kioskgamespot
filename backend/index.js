@@ -120,11 +120,18 @@ app.use(express.json({ limit: '10mb' }));
 // Serve the uploaded photos
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// First serve static files from the frontend directory if it exists
-const frontendDir = path.join(__dirname, 'frontend');
-if (fs.existsSync(frontendDir)) {
-  console.log(`Serving frontend files from: ${frontendDir}`);
-  app.use(express.static(frontendDir));
+// First try to serve from parent frontend directory
+const parentFrontendDir = path.join(__dirname, '..', 'frontend');
+if (fs.existsSync(parentFrontendDir)) {
+  console.log(`Serving frontend files from parent directory: ${parentFrontendDir}`);
+  app.use(express.static(parentFrontendDir));
+}
+
+// Then try original frontend directory inside backend
+const localFrontendDir = path.join(__dirname, 'frontend');
+if (fs.existsSync(localFrontendDir)) {
+  console.log(`Serving frontend files from local directory: ${localFrontendDir}`);
+  app.use(express.static(localFrontendDir));
 }
 
 // Then serve static files from public directory as a fallback
@@ -321,7 +328,7 @@ app.get('/api/payments', (req, res) => {
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
   // Updated timestamp
-  const currentDate = "2025-07-22 14:29:18";
+  const currentDate = "2025-07-22 14:46:06";
   const currentUser = 'Azonix07';
   
   res.json({
@@ -426,19 +433,25 @@ app.use((req, res, next) => {
   }
   
   try {
-    // Try to send index.html from frontend directory first
-    const frontendIndexPath = path.join(__dirname, 'frontend', 'index.html');
-    if (fs.existsSync(frontendIndexPath)) {
-      return res.sendFile(frontendIndexPath);
+    // Try parent frontend directory first
+    const parentFrontendIndexPath = path.join(__dirname, '..', 'frontend', 'index.html');
+    if (fs.existsSync(parentFrontendIndexPath)) {
+      return res.sendFile(parentFrontendIndexPath);
     }
     
-    // Fall back to public directory if frontend index.html doesn't exist
+    // Try local frontend directory next
+    const localFrontendIndexPath = path.join(__dirname, 'frontend', 'index.html');
+    if (fs.existsSync(localFrontendIndexPath)) {
+      return res.sendFile(localFrontendIndexPath);
+    }
+    
+    // Fall back to public directory
     const publicIndexPath = path.join(__dirname, 'public', 'index.html');
     if (fs.existsSync(publicIndexPath)) {
       return res.sendFile(publicIndexPath);
     }
     
-    // If neither exists, return a 404
+    // If none of these exist, return a 404
     res.status(404).send('Cannot find application entry point (index.html)');
   } catch (error) {
     console.error("Error serving index.html:", error);
@@ -450,7 +463,7 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   // Updated timestamp
-  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 14:29:18`);
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 14:46:06`);
   console.log(`Current User's Login: Azonix07`);
   console.log(`🚀 Unified server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
