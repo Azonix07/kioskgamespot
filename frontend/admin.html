@@ -621,7 +621,7 @@
 <body>
   <!-- Header Bar -->
   <div class="header-bar">
-    <div id="current-date">Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 09:04:15</div>
+    <div id="current-date">Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 15:27:30</div>
     <div id="current-user">Current User's Login: Azonix07</div>
   </div>
 
@@ -687,7 +687,7 @@
     // Update current date and time in UTC format with exact format requested
     function updateDateTime() {
       // Display static date/time as requested
-      document.getElementById('current-date').textContent = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 09:04:15";
+      document.getElementById('current-date').textContent = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 15:27:30";
       document.getElementById('current-user').textContent = "Current User's Login: Azonix07";
     }
 
@@ -736,6 +736,11 @@
 
     function cancelLogin() {
       window.location.href = 'index.html';
+    }
+
+    // Helper function to validate data URLs
+    function isValidDataUrl(url) {
+      return url && typeof url === 'string' && url.startsWith('data:image');
     }
 
     // Show status message
@@ -1246,18 +1251,18 @@
       }
     }
 
-    // Show user photo in modal
-    function showPhotoModal(id, console, timestamp, photoUrl, photoData) {
+    // Show user photo in modal using the IMG element ID to avoid large data URL in HTML attributes
+    function showPhotoModalById(imgElementId, id, consoleName, timestamp) {
       document.getElementById('photoPaymentId').textContent = id;
-      document.getElementById('photoConsoleName').textContent = console;
+      document.getElementById('photoConsoleName').textContent = consoleName;
       document.getElementById('photoTimestamp').textContent = timestamp;
       
-      // Use photoData if provided (base64 image from localStorage)
-      if (photoData) {
-        document.getElementById('fullUserPhoto').src = photoData;
+      // Get the image source directly from the element
+      const imgElement = document.getElementById(imgElementId);
+      if (imgElement && imgElement.src) {
+        document.getElementById('fullUserPhoto').src = imgElement.src;
       } else {
-        // Otherwise use photoUrl or fallback
-        document.getElementById('fullUserPhoto').src = photoUrl || 'https://via.placeholder.com/400x300?text=No+Photo+Available';
+        document.getElementById('fullUserPhoto').src = 'https://via.placeholder.com/400x300?text=No+Photo+Available';
       }
       
       document.getElementById('photoModal').style.display = 'flex';
@@ -1400,7 +1405,7 @@
       document.querySelector(`.payment-tab[onclick="switchTab('${tabId}')"]`).classList.add('active');
     }
     
-    // Create payment table HTML with user photos and amount
+    // Create payment table HTML with user photos and amount - Fixed to properly handle base64 images
     function createPaymentTable(payments, includePhotos = false) {
       if (payments.length === 0) {
         return '<div style="text-align: center; padding: 20px;">No payment records found</div>';
@@ -1424,31 +1429,34 @@
       tableHtml += '<th>Status</th>';
       tableHtml += '</tr>';
       
-      payments.forEach(p => {
+      payments.forEach((p, index) => {
         tableHtml += `<tr>`;
         
         // Add user photo thumbnail if includePhotos is true
         if (includePhotos) {
-          // For bookings with photoData, use that directly
-          if (p.photoData) {
+          // Generate a unique ID for this photo
+          const photoId = `photo-${p.id}-${index}`;
+          
+          if (p.photoData && isValidDataUrl(p.photoData)) {
+            // Valid data URL - use it directly but don't embed in onclick
             tableHtml += `<td>
               <img src="${p.photoData}" alt="User" class="user-thumbnail" 
-              onclick="showPhotoModal('${p.id}', '${p.console}', '${formatDateTime(p.paid_at)}', null, '${p.photoData}')">
+                id="${photoId}" onclick="showPhotoModalById('${photoId}', '${p.id}', '${p.console}', '${formatDateTime(p.paid_at)}')">
             </td>`;
           } 
-          // For server bookings with photoUrl
-          else if (p.source === 'server' && p.photoUrl) {
+          else if (p.photoUrl && isValidDataUrl(p.photoUrl)) {
+            // Valid URL from photoUrl field
             tableHtml += `<td>
               <img src="${p.photoUrl}" alt="User" class="user-thumbnail" 
-              onclick="showPhotoModal('${p.id}', '${p.console}', '${formatDateTime(p.paid_at)}', '${p.photoUrl}')">
+                id="${photoId}" onclick="showPhotoModalById('${photoId}', '${p.id}', '${p.console}', '${formatDateTime(p.paid_at)}')">
             </td>`;
           }
-          // Fallback for no photo
           else {
+            // Fallback to placeholder
             const placeholderUrl = `https://randomuser.me/api/portraits/men/${typeof p.id === 'number' ? p.id % 70 : 1}.jpg`;
             tableHtml += `<td>
               <img src="${placeholderUrl}" alt="User" class="user-thumbnail" 
-              onclick="showPhotoModal('${p.id}', '${p.console}', '${formatDateTime(p.paid_at)}', '${placeholderUrl}')">
+                id="${photoId}" onclick="showPhotoModalById('${photoId}', '${p.id}', '${p.console}', '${formatDateTime(p.paid_at)}')">
             </td>`;
           }
         }

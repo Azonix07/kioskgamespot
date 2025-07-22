@@ -91,6 +91,19 @@ function initializeDatabase() {
   });
 }
 
+// Helper function to ensure base64 data is properly formatted as a data URL
+function ensureDataUrlFormat(photoData) {
+  if (!photoData) return null;
+  
+  // If it's already a valid data URL, return it as is
+  if (photoData.startsWith('data:image')) {
+    return photoData;
+  }
+  
+  // Otherwise, assume it's a raw base64 string and add the prefix
+  return `data:image/jpeg;base64,${photoData}`;
+}
+
 // Try to initialize the database tables
 initializeDatabase();
 
@@ -202,8 +215,14 @@ app.post('/api/pay', (req, res) => {
     return res.status(400).json({ error: 'Missing payment method' });
   }
   
-  // Process payment directly with the photoData
-  processPaymentWithBase64(console, minutesNumber, method, photoData, res);
+  // Make sure photoData is properly formatted before storing
+  let formattedPhotoData = null;
+  if (photoData) {
+    formattedPhotoData = ensureDataUrlFormat(photoData);
+  }
+  
+  // Process payment with the properly formatted photoData
+  processPaymentWithBase64(console, minutesNumber, method, formattedPhotoData, res);
 });
 
 // Helper function to process payment and update database with Base64 photo
@@ -257,11 +276,13 @@ app.get('/api/payments', (req, res) => {
     }
     
     const payments = rows.map(row => {
-      // Return photo data in BOTH photoUrl and photoData fields for compatibility
+      // Format the photo data properly and return in both fields for compatibility
+      const formattedPhotoData = ensureDataUrlFormat(row.photo_data);
+      
       return {
         ...row,
-        photoUrl: row.photo_data || null,
-        photoData: row.photo_data || null
+        photoUrl: formattedPhotoData,
+        photoData: formattedPhotoData
       };
     });
     
@@ -272,7 +293,7 @@ app.get('/api/payments', (req, res) => {
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
   // Updated timestamp
-  const currentDate = "2025-07-22 15:13:45";
+  const currentDate = "2025-07-22 15:18:54";
   const currentUser = 'Azonix07';
   
   res.json({
@@ -434,7 +455,7 @@ app.use((req, res, next) => {
 // Start the server
 app.listen(PORT, () => {
   // Updated timestamp
-  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 15:13:45`);
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 15:18:54`);
   console.log(`Current User's Login: Azonix07`);
   console.log(`🚀 Unified server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
