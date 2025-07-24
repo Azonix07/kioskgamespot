@@ -1,15 +1,13 @@
-# Use Node.js as the base image
 FROM node:16
 
 # Set working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json files first
-# This allows Docker to cache npm install step if these files don't change
+# Copy package.json and package-lock.json files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies with increased memory allocation
+RUN node --max_old_space_size=4096 /usr/local/bin/npm install
 
 # Copy the rest of your application code
 COPY . .
