@@ -212,6 +212,31 @@
       filter: brightness(1.1);
     }
 
+    /* ESP32 status indicators */
+    .esp32-status {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    
+    .esp32-online {
+      background-color: #4CAF50;
+      box-shadow: 0 0 8px #4CAF50;
+    }
+    
+    .esp32-offline {
+      background-color: #F44336;
+      box-shadow: 0 0 8px #F44336;
+    }
+    
+    .esp32-unknown {
+      background-color: #FFC107;
+      box-shadow: 0 0 8px #FFC107;
+    }
+
     /* Modal Background */
     .modal {
       display: flex; /* Show immediately */
@@ -388,6 +413,12 @@
       background-color: rgba(255, 0, 0, 0.2);
       border: 1px solid #f44336;
       color: #ff9999;
+    }
+
+    .info {
+      background-color: rgba(0, 0, 255, 0.2);
+      border: 1px solid #2196F3;
+      color: #99ccff;
     }
 
     /* Loading indicator */
@@ -621,7 +652,7 @@
 <body>
   <!-- Header Bar -->
   <div class="header-bar">
-    <div id="current-date">Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 15:27:30</div>
+    <div id="current-date">Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-23 12:06:56</div>
     <div id="current-user">Current User's Login: Azonix07</div>
   </div>
 
@@ -671,6 +702,7 @@
       <button class="admin-button" onclick="fetchConsoles()">View All Devices</button>
       <button class="admin-button" onclick="fetchPayments()">View Payments</button>
       <button class="admin-button" onclick="resetAllBookings()">Reset All Bookings</button>
+      <button class="admin-button" onclick="checkESP32Status()">Check ESP32 Status</button>
       <button class="admin-button" onclick="goBack()">Go Back</button>
     </div>
 
@@ -687,7 +719,7 @@
     // Update current date and time in UTC format with exact format requested
     function updateDateTime() {
       // Display static date/time as requested
-      document.getElementById('current-date').textContent = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 15:27:30";
+      document.getElementById('current-date').textContent = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-23 12:06:56";
       document.getElementById('current-user').textContent = "Current User's Login: Azonix07";
     }
 
@@ -704,6 +736,9 @@
     let consoleData = [];
     let timerUpdateInterval = null;
     const API_BASE_URL = '/api';
+    
+    // Store ESP32 status
+    let esp32Status = {};
 
     function addDigit(digit) {
       if (password.length < 4) {
@@ -964,14 +999,24 @@
       }
     }
     
-    // Move an expired booking to history by console name
-    function moveExpiredBookingToHistory(consoleName) {
+    // Move an expired booking to history by console name and turn off PS5
+    async function moveExpiredBookingToHistory(consoleName) {
       const bookings = getLocalBookings();
       const booking = bookings.find(b => b.console === consoleName);
       
       if (booking && !booking.adminControl) {
         moveBookingToPaymentHistory(booking);
         clearLocalBooking(consoleName);
+        
+        // Turn off PS5 when timer expires
+        if (consoleName.includes('PS5')) {
+          try {
+            await sendPowerCommand(consoleName, 'off');
+            console.log(`Timer expired: Power OFF command sent to ${consoleName}`);
+          } catch (err) {
+            console.error(`Error turning off ${consoleName} after timer expired:`, err);
+          }
+        }
       }
     }
 
@@ -1032,15 +1077,116 @@
       localStorage.setItem('consoleBookings', JSON.stringify([]));
     }
     
+    // Send power command to ESP32
+    async function sendPowerCommand(consoleName, action) {
+      try {
+        showStatusMessage(`Sending ${action} command to ${consoleName}...`, 'info');
+        
+        const response = await fetch(`${API_BASE_URL}/power-control`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            console: consoleName,
+            action: action
+          })
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Unknown error');
+        }
+        
+        const result = await response.json();
+        showStatusMessage(`${result.message}`, 'success');
+        return true;
+      } catch (error) {
+        console.error(`Error sending power ${action} command to ${consoleName}:`, error);
+        showStatusMessage(`Failed to send power ${action} command to ${consoleName}: ${error.message}`, 'error');
+        return false;
+      }
+    }
+    
+    // Check ESP32 status
+    async function checkESP32Status() {
+      const adminData = document.getElementById('adminData');
+      adminData.innerHTML = '<div style="text-align: center; padding: 20px;">Checking ESP32 status...<div class="loading" style="margin: 10px auto; display: block;"></div></div>';
+      
+      try {
+        const response = await fetch(`${API_BASE_URL}/esp32-status`);
+        
+        if (!response.ok) {
+          throw new Error(`API returned status ${response.status}`);
+        }
+        
+        const data = await response.json();
+        esp32Status = {};
+        
+        // Generate HTML for ESP32 status table
+        let html = '<h3 style="margin-bottom: 15px; color: rgb(255, 111, 0);">ESP32 Controller Status</h3>';
+        html += '<table class="device-table">';
+        html += '<tr>';
+        html += '<th>Console</th>';
+        html += '<th>IP Address</th>';
+        html += '<th>Status</th>';
+        html += '<th>Actions</th>';
+        html += '</tr>';
+        
+        data.controllers.forEach(controller => {
+          esp32Status[controller.console] = controller.status;
+          
+          html += `<tr>`;
+          html += `<td>${controller.console}</td>`;
+          html += `<td>${controller.ip}</td>`;
+          html += `<td>
+            <span class="esp32-status esp32-${controller.status}"></span>
+            ${controller.status === 'online' ? 'Online' : 'Offline'}
+          </td>`;
+          html += `<td>
+            ${controller.status === 'online' ? 
+              `<button class="power-button power-on" onclick="sendPowerCommand('${controller.console}', 'on')">Power ON</button>
+               <button class="power-button power-off" onclick="sendPowerCommand('${controller.console}', 'off')">Power OFF</button>` : 
+              '<button class="power-button" disabled>Unavailable</button>'}
+          </td>`;
+          html += `</tr>`;
+        });
+        
+        html += '</table>';
+        html += `<p style="font-size: 0.9rem; color: #aaa; margin-top: 20px; text-align: right;">
+          Last updated: ${new Date(data.timestamp).toLocaleString()}</p>`;
+        
+        adminData.innerHTML = html;
+      } catch (error) {
+        adminData.innerHTML = `<div class="error" style="display: block;">
+          Error checking ESP32 status: ${error.message}<br>
+          <button class="admin-button" style="margin-top: 15px;" onclick="fetchConsoles()">Back to Consoles</button>
+        </div>`;
+      }
+    }
+    
     // Toggle admin power control for a device
-    function togglePower(consoleName, currentState) {
+    async function togglePower(consoleName, currentState) {
       const newState = !currentState;
       
       // Get current bookings
       const bookings = getLocalBookings();
       
       if (newState) {
-        // Turn ON - Add admin control booking
+        // Turn ON - Send power ON command to ESP32 if it's a PS5
+        if (consoleName.includes('PS5')) {
+          try {
+            const success = await sendPowerCommand(consoleName, 'on');
+            if (!success) {
+              showStatusMessage(`Warning: Failed to send power ON command to ${consoleName}, but booking will still be created`, 'info');
+            }
+          } catch (err) {
+            console.error(`Error sending power ON command to ${consoleName}:`, err);
+            showStatusMessage(`Warning: Failed to send power ON command to ${consoleName}, but booking will still be created`, 'info');
+          }
+        }
+        
+        // Add admin control booking
         const existingIndex = bookings.findIndex(b => b.console === consoleName);
         
         // Create admin booking object
@@ -1060,23 +1206,30 @@
           bookings.push(adminBooking);
         }
         
+        // Save updated bookings
+        localStorage.setItem('consoleBookings', JSON.stringify(bookings));
         showStatusMessage(`${consoleName} turned ON by admin`, 'success');
       } else {
-        // Turn OFF - Remove admin control booking
-        const filteredBookings = bookings.filter(b => b.console !== consoleName);
+        // Turn OFF - Send power OFF command to ESP32 if it's a PS5
+        if (consoleName.includes('PS5')) {
+          try {
+            const success = await sendPowerCommand(consoleName, 'off');
+            if (!success) {
+              showStatusMessage(`Warning: Failed to send power OFF command to ${consoleName}, but booking will still be removed`, 'info');
+            }
+          } catch (err) {
+            console.error(`Error sending power OFF command to ${consoleName}:`, err);
+            showStatusMessage(`Warning: Failed to send power OFF command to ${consoleName}, but booking will still be removed`, 'info');
+          }
+        }
         
-        showStatusMessage(`${consoleName} turned OFF by admin`, 'success');
+        // Remove admin control booking
+        const filteredBookings = bookings.filter(b => b.console !== consoleName);
         
         // Update bookings with filtered list
         localStorage.setItem('consoleBookings', JSON.stringify(filteredBookings));
-        
-        // Refresh the consoles display
-        fetchConsoles();
-        return;
+        showStatusMessage(`${consoleName} turned OFF by admin`, 'success');
       }
-      
-      // Save updated bookings
-      localStorage.setItem('consoleBookings', JSON.stringify(bookings));
       
       // Refresh the consoles display
       fetchConsoles();
@@ -1155,8 +1308,13 @@
           // Create a unique ID for this timer cell for live updates
           const timerId = `timer-${c.name.replace(/[^a-zA-Z0-9]/g, '-')}`;
           
+          // Check if this is a PS5 and add ESP32 status indicator
+          const isPS5 = c.name.includes('PS5');
+          const esp32StatusClass = esp32Status[c.name] ? 
+            `esp32-${esp32Status[c.name]}` : 'esp32-unknown';
+          
           html += `<tr>`;
-          html += `<td>${c.name}</td>`;
+          html += `<td>${c.name}${isPS5 ? ` <span class="esp32-status ${esp32StatusClass}"></span>` : ''}</td>`;
           html += `<td><span class="${statusClass}">${status}</span></td>`;
           html += `<td>
             ${c.source === 'local' ? 
@@ -1189,7 +1347,7 @@
       }
     }
 
-    // Reset a single device - Enhanced to handle local bookings
+    // Reset a single device - Enhanced to handle local bookings and ESP32 power off
     async function resetDevice(name, source) {
       if (!confirm(`Are you sure you want to reset the timer for ${name}?`)) {
         return;
@@ -1198,17 +1356,33 @@
       // Get the button and add a loading indicator
       const buttons = document.querySelectorAll('.reset-button');
       buttons.forEach(btn => {
-        if (btn.parentNode.previousElementSibling.previousElementSibling.previousElementSibling.previousElementSibling.textContent === name) {
+        if (btn.parentNode.previousElementSibling.previousElementSibling.previousElementSibling.previousElementSibling.textContent.includes(name)) {
           btn.disabled = true;
           btn.innerHTML = 'Resetting <div class="loading"></div>';
         }
       });
       
       try {
+        // Power off PS5 if applicable
+        let powerOffAttempted = false;
+        if (name.includes('PS5')) {
+          try {
+            await sendPowerCommand(name, 'off');
+            powerOffAttempted = true;
+          } catch (powerErr) {
+            console.error(`Error sending power OFF command to ${name}:`, powerErr);
+          }
+        }
+        
         // Handle local booking reset
         if (source === 'local') {
           clearLocalBooking(name);
-          showStatusMessage(`Timer for ${name} has been reset successfully!`, 'success');
+          showStatusMessage(
+            powerOffAttempted ? 
+              `Timer for ${name} has been reset and device powered off!` : 
+              `Timer for ${name} has been reset successfully!`, 
+            'success'
+          );
           fetchConsoles(); // Refresh the device list
           return;
         }
@@ -1243,7 +1417,7 @@
         
         // Reset the button state
         buttons.forEach(btn => {
-          if (btn.parentNode.previousElementSibling.previousElementSibling.previousElementSibling.previousElementSibling.textContent === name) {
+          if (btn.parentNode.previousElementSibling.previousElementSibling.previousElementSibling.previousElementSibling.textContent.includes(name)) {
             btn.disabled = false;
             btn.textContent = 'Reset Timer';
           }
@@ -1488,18 +1662,40 @@
       return tableHtml;
     }
 
-    // Reset all bookings - Enhanced to handle local bookings too
+    // Reset all bookings - Enhanced to handle local bookings and power off PS5s
     async function resetAllBookings() {
       if (!confirm('Are you sure you want to reset ALL device timers? This cannot be undone.')) {
         return;
       }
       
       try {
-        const adminData = document.getElementById('adminData');
+                const adminData = document.getElementById('adminData');
         adminData.innerHTML = '<div style="text-align: center; padding: 20px;">Resetting all bookings...<div class="loading" style="margin: 10px auto; display: block;"></div></div>';
         
-        // Clear all local bookings (this now moves them to payment history)
+        // Get all PS5 consoles that are currently booked
+        const psConsoles = [];
+        const bookings = getLocalBookings();
+        bookings.forEach(booking => {
+          if (booking.console.includes('PS5')) {
+            psConsoles.push(booking.console);
+          }
+        });
+        
+        // Clear all local bookings
         clearAllBookings();
+        
+        // Send power OFF commands to all PS5 consoles
+        if (psConsoles.length > 0) {
+          showStatusMessage(`Powering off ${psConsoles.length} PS5 consoles...`, 'info');
+          
+          const powerOffPromises = psConsoles.map(consoleName => {
+            return sendPowerCommand(consoleName, 'off')
+              .catch(err => console.error(`Error turning off ${consoleName}:`, err));
+          });
+          
+          // Wait for all power commands to complete
+          await Promise.allSettled(powerOffPromises);
+        }
         
         // Reset server bookings
         let serverResetSuccessful = true;
@@ -1561,11 +1757,12 @@
       localStorage.setItem('photoHistory', JSON.stringify({}));
     }
     
-    // Check for expired bookings on page load
-    (function checkExpiredBookings() {
+    // Check for expired bookings on page load and turn off PS5s if they've expired
+    (async function checkExpiredBookings() {
       const bookings = JSON.parse(localStorage.getItem('consoleBookings') || '[]');
       const currentTime = Date.now();
       const activeBookings = [];
+      const expiredPS5s = [];
       let hasExpired = false;
       
       bookings.forEach(booking => {
@@ -1580,13 +1777,36 @@
         } else {
           moveBookingToPaymentHistory(booking);
           hasExpired = true;
+          
+          // Track expired PS5s for power off
+          if (booking.console.includes('PS5')) {
+            expiredPS5s.push(booking.console);
+          }
         }
       });
       
       if (hasExpired) {
         localStorage.setItem('consoleBookings', JSON.stringify(activeBookings));
+        
+        // Turn off any PS5s that have expired
+        if (expiredPS5s.length > 0) {
+          console.log(`Turning off ${expiredPS5s.length} expired PS5 consoles on page load`);
+          
+          for (const consoleName of expiredPS5s) {
+            try {
+              await sendPowerCommand(consoleName, 'off');
+              console.log(`Power OFF command sent to expired console ${consoleName}`);
+            } catch (err) {
+              console.error(`Error turning off expired console ${consoleName}:`, err);
+            }
+          }
+        }
       }
     })();
+
+    // Update the displayed time
+    document.getElementById('current-date').textContent = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-23 12:12:43";
+    document.getElementById('current-user').textContent = "Current User's Login: Azonix07";
   </script>
 </body>
 </html>

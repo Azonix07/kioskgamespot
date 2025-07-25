@@ -3,6 +3,7 @@ const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
 const { v4: uuidv4 } = require('uuid');
 
 // Restore `console.log` if overridden
@@ -183,30 +184,27 @@ function ensureDataUrlFormat(photoData) {
   }
 }
 
-app.use(cors());
+// Update CORS to allow requests from Netlify
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:8080',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:8080',
+    'https://gamespot-kiosk.netlify.app', // Add your Netlify domain
+    /\.netlify\.app$/  // Allow any Netlify subdomain
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true
+}));
+
 // Increase JSON size limit for base64 encoded images
 app.use(express.json({ limit: '20mb' }));
 
-// First try to serve from parent frontend directory
-const parentFrontendDir = path.join(__dirname, '..', 'frontend');
-if (fs.existsSync(parentFrontendDir)) {
-  console.log(`Serving frontend files from parent directory: ${parentFrontendDir}`);
-  app.use(express.static(parentFrontendDir));
-}
-
-// Then try original frontend directory inside backend
-const localFrontendDir = path.join(__dirname, 'frontend');
-if (fs.existsSync(localFrontendDir)) {
-  console.log(`Serving frontend files from local directory: ${localFrontendDir}`);
-  app.use(express.static(localFrontendDir));
-}
-
-// Then serve static files from public directory as a fallback
-const publicDir = path.join(__dirname, 'public');
-if (fs.existsSync(publicDir)) {
-  console.log(`Serving public files as fallback from: ${publicDir}`);
-  app.use(express.static(publicDir));
-}
+// Add health check endpoint for Netlify
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 // Log all API requests
 app.use('/api', (req, res, next) => {
@@ -341,14 +339,38 @@ function processPayment(console, minutes, method, photoData, res) {
             console.log(`Console "${console}" marked as booked until ${new Date(endTime).toISOString()}`);
           }
           
-          // Return success even if booking update failed
-          res.json({ 
-            success: true,
-            message: "Payment processed successfully",
-            paymentId: this.lastID,
-            timestamp: new Date().toISOString(),
-            photoSaved: photoData ? true : false
-          });
+          // Turn on the PS5 if it's a PS5 console
+          let powerCommandSent = false;
+          if (console.includes('PS5')) {
+            sendPowerCommand(console, 'on')
+              .then(() => {
+                console.log(`Power ON command sent to ${console}`);
+                powerCommandSent = true;
+              })
+              .catch(err => {
+                console.error(`Failed to send power ON command to ${console}:`, err.message);
+              })
+              .finally(() => {
+                // Return success regardless of power command result
+                res.json({ 
+                  success: true,
+                  message: "Payment processed successfully",
+                  paymentId: this.lastID,
+                  timestamp: new Date().toISOString(),
+                  photoSaved: photoData ? true : false,
+                  powerOn: powerCommandSent
+                });
+              });
+          } else {
+            // Return success for non-PS5 consoles
+            res.json({ 
+              success: true,
+              message: "Payment processed successfully",
+              paymentId: this.lastID,
+              timestamp: new Date().toISOString(),
+              photoSaved: photoData ? true : false
+            });
+          }
         }
       );
     });
@@ -356,6 +378,89 @@ function processPayment(console, minutes, method, photoData, res) {
     console.error("Unexpected error in processPayment:", error);
     return res.status(500).json({ error: 'An unexpected error occurred processing the payment' });
   }
+}
+
+// ESP32 Power Control API
+app.post('/api/power-control', (req, res) => {
+  const { console, action } = req.body;
+  
+  if (!console || !['on', 'off'].includes(action)) {
+    return res.status(400).json({ error: 'Invalid request. Required: console name and action (on/off)' });
+  }
+  
+  sendPowerCommand(console, action)
+    .then(() => {
+      res.json({ 
+        success: true, 
+        message: `${console} power ${action} command sent successfully` 
+      });
+    })
+    .catch(error => {
+      console.error(`Error sending power command to ${console}:`, error.message);
+      res.status(500).json({ 
+        error: `Failed to communicate with ESP32 controller for ${console}`,
+        details: error.message 
+      });
+    });
+});
+
+// Helper function to send power commands to ESP32 devices
+function sendPowerCommand(consoleName, action) {
+  return new Promise((resolve, reject) => {
+    // Map console names to ESP32 IP addresses
+    // Replace these with your actual ESP32 IP addresses on your network
+    const esp32IpMap = {
+      'PS5 #1': '192.168.1.101',
+      'PS5 #2': '192.168.1.102',
+      'PS5 #3': '192.168.1.103',
+      'PS5 #4': '192.168.1.104'
+    };
+    
+    const deviceIp = esp32IpMap[consoleName];
+    
+    if (!deviceIp) {
+      return reject(new Error(`No ESP32 configured for console: ${consoleName}`));
+    }
+    
+    console.log(`Sending ${action} command to ${consoleName} at ${deviceIp}`);
+    
+    // Send command to the ESP32
+    const options = {
+      hostname: deviceIp,
+      port: 80,
+      path: `/power/${action}`,
+      method: 'GET',
+      timeout: 5000 // 5 second timeout
+    };
+    
+    const request = http.request(options, (response) => {
+      let data = '';
+      
+      response.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      response.on('end', () => {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          console.log(`ESP32 response for ${consoleName}: ${data}`);
+          resolve();
+        } else {
+          reject(new Error(`ESP32 returned status code: ${response.statusCode}`));
+        }
+      });
+    });
+    
+    request.on('error', (error) => {
+      reject(error);
+    });
+    
+    request.on('timeout', () => {
+      request.abort();
+      reject(new Error(`Request to ESP32 for ${consoleName} timed out`));
+    });
+    
+    request.end();
+  });
 }
 
 // Safe payments endpoint with fallback if column doesn't exist
@@ -407,7 +512,7 @@ app.get('/api/payments', (req, res) => {
 // Endpoint to get system info
 app.get('/api/info', (req, res) => {
   // Updated timestamp
-  const currentDate = "2025-07-22 18:08:31";
+  const currentDate = new Date().toISOString().replace('T', ' ').substring(0, 19);
   const currentUser = 'Azonix07';
   
   res.json({
@@ -457,15 +562,42 @@ app.get('/api/debug/tables', (req, res) => {
 // Reset endpoint to clear all bookings (for admin use)
 app.post('/api/reset', (req, res) => {
   try {
-    db.run('UPDATE ps5_consoles SET booked = 0, end_time = NULL', function(err) {
-      if (err) {
-        console.error("Error resetting console bookings:", err.message);
-        return res.status(500).json({ error: 'Failed to reset bookings' });
+    // First get all PS5 consoles that are currently booked
+    db.all(
+      'SELECT name FROM ps5_consoles WHERE booked = 1 AND name LIKE "PS5 %"',
+      [],
+      async function(err, rows) {
+        if (err) {
+          console.error("Error fetching booked consoles:", err.message);
+          return res.status(500).json({ error: 'Failed to fetch booked consoles' });
+        }
+        
+        // Reset the bookings in the database
+        db.run('UPDATE ps5_consoles SET booked = 0, end_time = NULL', function(err) {
+          if (err) {
+            console.error("Error resetting console bookings:", err.message);
+            return res.status(500).json({ error: 'Failed to reset bookings' });
+          }
+          
+          console.log(`All console bookings reset by Azonix07 at ${new Date().toISOString()}`);
+          
+          // Send power off commands to all previously booked PS5 consoles
+          const powerPromises = rows.map(row => {
+            return sendPowerCommand(row.name, 'off')
+              .then(() => console.log(`Power OFF command sent to ${row.name}`))
+              .catch(err => console.error(`Failed to send power OFF command to ${row.name}:`, err.message));
+          });
+          
+          // Wait for all power commands to complete or fail
+          Promise.allSettled(powerPromises).then(() => {
+            res.json({ 
+              success: true, 
+              message: 'All bookings have been reset and PS5 consoles powered off' 
+            });
+          });
+        });
       }
-      
-      console.log(`All console bookings reset by Azonix07 at ${new Date().toISOString()}`);
-      res.json({ success: true, message: 'All bookings have been reset' });
-    });
+    );
   } catch (error) {
     console.error("Unexpected error in /api/reset:", error);
     res.status(500).json({ error: 'An unexpected error occurred' });
@@ -496,7 +628,29 @@ app.post('/api/reset-single', (req, res) => {
         }
         
         console.log(`Console ${consoleName} booking reset by Azonix07 at ${new Date().toISOString()}`);
-        res.json({ success: true, message: `Booking for ${consoleName} has been reset` });
+        
+        // If it's a PS5, send power off command
+        if (consoleName.includes('PS5')) {
+          sendPowerCommand(consoleName, 'off')
+            .then(() => {
+              console.log(`Power OFF command sent to ${consoleName}`);
+              res.json({ 
+                success: true, 
+                message: `Booking for ${consoleName} has been reset and console powered off` 
+              });
+            })
+            .catch(err => {
+              console.error(`Failed to send power OFF command to ${consoleName}:`, err.message);
+              // Still return success since the booking was reset
+              res.json({ 
+                success: true, 
+                message: `Booking for ${consoleName} has been reset, but power off command failed` 
+              });
+            });
+        } else {
+          // Not a PS5, just return success
+          res.json({ success: true, message: `Booking for ${consoleName} has been reset` });
+        }
       }
     );
   } catch (error) {
@@ -505,46 +659,69 @@ app.post('/api/reset-single', (req, res) => {
   }
 });
 
-// Serve index.html for client-side routing
-app.use((req, res, next) => {
-  // Skip API routes, static files, and files with extensions
-  if (req.path.startsWith('/api') || req.path.indexOf('.') !== -1) {
-    return next();
-  }
+// ESP32 status check endpoint
+app.get('/api/esp32-status', (req, res) => {
+  // Map console names to ESP32 IP addresses
+  const esp32IpMap = {
+    'PS5 #1': '192.168.1.101',
+    'PS5 #2': '192.168.1.102',
+    'PS5 #3': '192.168.1.103',
+    'PS5 #4': '192.168.1.104'
+  };
   
-  try {
-    // Try parent frontend directory first
-    const parentFrontendIndexPath = path.join(__dirname, '..', 'frontend', 'index.html');
-    if (fs.existsSync(parentFrontendIndexPath)) {
-      return res.sendFile(parentFrontendIndexPath);
-    }
-    
-    // Try local frontend directory next
-    const localFrontendIndexPath = path.join(__dirname, 'frontend', 'index.html');
-    if (fs.existsSync(localFrontendIndexPath)) {
-      return res.sendFile(localFrontendIndexPath);
-    }
-    
-    // Fall back to public directory
-    const publicIndexPath = path.join(__dirname, 'public', 'index.html');
-    if (fs.existsSync(publicIndexPath)) {
-      return res.sendFile(publicIndexPath);
-    }
-    
-    // If none of these exist, return a 404
-    res.status(404).send('Cannot find application entry point (index.html)');
-  } catch (error) {
-    console.error("Error serving index.html:", error);
-    res.status(500).send('Server error when trying to serve the application');
-  }
+  const statusPromises = Object.entries(esp32IpMap).map(([consoleName, ip]) => {
+    return new Promise(resolve => {
+      const options = {
+        hostname: ip,
+        port: 80,
+        path: '/',
+        method: 'GET',
+        timeout: 2000 // 2 second timeout
+      };
+      
+      const request = http.request(options, (response) => {
+        resolve({ 
+          console: consoleName, 
+          ip,
+          status: 'online', 
+          statusCode: response.statusCode 
+        });
+      });
+      
+      request.on('error', () => {
+        resolve({ console: consoleName, ip, status: 'offline', error: 'Cannot connect' });
+      });
+      
+      request.on('timeout', () => {
+        request.abort();
+        resolve({ console: consoleName, ip, status: 'offline', error: 'Timeout' });
+      });
+      
+      request.end();
+    });
+  });
+  
+  Promise.all(statusPromises)
+    .then(results => {
+      res.json({
+        timestamp: new Date().toISOString(),
+        controllers: results
+      });
+    })
+    .catch(error => {
+      console.error("Error checking ESP32 status:", error);
+      res.status(500).json({ error: 'Failed to check ESP32 status' });
+    });
 });
 
-// Start the server
-app.listen(PORT, () => {
+// Start the server with explicit address binding to ensure it's accessible
+app.listen(PORT, '0.0.0.0', () => {
   // Updated timestamp
-  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 18:08:31`);
+  const currentDate = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  console.log(`Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): ${currentDate}`);
   console.log(`Current User's Login: Azonix07`);
-  console.log(`🚀 Unified server running on port ${PORT}`);
+  console.log(`🚀 Backend API server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
-  console.log(`Frontend served from http://localhost:${PORT}`);
+  console.log(`This backend should be accessed by your Netlify frontend`);
+  console.log(`ESP32 control is enabled and will attempt to connect to local network devices`);
 });

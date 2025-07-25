@@ -901,7 +901,39 @@
       }
     });
 
-    // UPDATED: Handle successful payment completion - Now includes API call to server
+    // Function to send power command to ESP32
+    async function sendPowerCommand(consoleName, action) {
+      try {
+        showStatusMessage(`Sending ${action} command to ${consoleName}...`, 'info');
+        
+        const response = await fetch('/api/power-control', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            console: consoleName,
+            action: action
+          })
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Unknown error');
+        }
+        
+        const result = await response.json();
+        console.log(`Power ${action} result:`, result);
+        showStatusMessage(`${consoleName} ${action === 'on' ? 'powered on' : 'powered off'} successfully`, 'success');
+        return true;
+      } catch (error) {
+        console.error(`Error sending power ${action} command to ${consoleName}:`, error);
+        showStatusMessage(`Note: Device power control failed, but booking will continue.`, 'info');
+        return false;
+      }
+    }
+
+    // UPDATED: Handle successful payment completion - Now includes API call to server and ESP32 power control
     async function handleSuccessfulPayment(response, method, amount) {
       try {
         // Get payment details
@@ -947,7 +979,17 @@
         photos[bookingId] = photoDataUrl;
         localStorage.setItem('userPhotos', JSON.stringify(photos));
         
-        // NEW CODE: Send payment and photo data to backend API
+        // Send power ON command to PS5 if applicable
+        let powerCommandSent = false;
+        if (consoleName.includes('PS5')) {
+          try {
+            powerCommandSent = await sendPowerCommand(consoleName, 'on');
+          } catch (powerErr) {
+            console.error(`Error sending power ON command to ${consoleName}:`, powerErr);
+          }
+        }
+        
+        // Send payment and photo data to backend API
         try {
           console.log("Sending payment data to server...");
           showStatusMessage("Sending payment data to server...", "info");
@@ -980,7 +1022,6 @@
           showStatusMessage(`Server payment processing warning: ${apiErr.message}. Local booking will still work.`, "info");
           // Continue with local booking even if server API fails
         }
-        // END NEW CODE
         
         // Store booking in the new multi-booking format
         const newBooking = {
@@ -1010,7 +1051,11 @@
         localStorage.setItem('consoleBookings', JSON.stringify(bookings));
         
         // Show success message
-        showStatusMessage('Payment successful! Redirecting to main screen...', 'success');
+        if (powerCommandSent) {
+          showStatusMessage('Payment successful! Your device is now powered on. Redirecting...', 'success');
+        } else {
+          showStatusMessage('Payment successful! Redirecting to main screen...', 'success');
+        }
         
         // Stop camera stream
         if (stream) {
@@ -1054,7 +1099,7 @@
     // Initialize page
     function init() {
       // Store current date and time in a variable
-      const currentDateTime = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-22 18:20:20";
+      const currentDateTime = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-23 12:15:44";
       const currentUser = "Current User's Login: Azonix07";
       
       initPaymentDetails();
