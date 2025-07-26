@@ -191,7 +191,7 @@ app.use(cors({
     'http://localhost:8080',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:8080',
-    'https://gamespot-kiosk.netlify.app', // Add your Netlify domain
+    'https://thunderous-mousse-5629f8.netlify.app/', // Add your Netlify domain
     /\.netlify\.app$/  // Allow any Netlify subdomain
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
