@@ -11,7 +11,12 @@ console.log = console.log || ((...args) => process.stdout.write(args.join(' ') +
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const dbPath = path.resolve(__dirname, 'gamespot.db');
+// Replace your current dbPath definition with this
+const dbPath = process.env.NODE_ENV === 'production'
+  ? path.resolve('/data', 'gamespot.db')
+  : path.resolve(__dirname, 'gamespot.db');
+
+console.log(`Using database at path: ${dbPath}`);
 
 // Global error handlers
 process.on('uncaughtException', (err) => {
