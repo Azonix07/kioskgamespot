@@ -7,6 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Firebase Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
   <style>
     /* Global Styling */
     * {
@@ -381,88 +384,217 @@
       width: 100%;
       gap: 15px;
     }
-    
-    /* UPI QR Code Container */
-    .upi-container {
+
+    /* UPI QR Modal */
+    .qr-modal {
       display: none;
-      background: rgba(30, 30, 47, 0.7);
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.85);
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
       padding: 20px;
-      border-radius: 10px;
-      max-width: 320px;
-      margin: 15px auto;
-      color: white;
-      border: 1px solid rgba(255, 111, 0, 0.3);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-      text-align: center;
-    }
-    
-    .upi-container p {
-      margin: 10px 0;
-      font-weight: 500;
-      font-size: 0.95rem;
-      line-height: 1.4;
-      opacity: 0.9;
     }
 
-    .upi-test-note {
-      margin-top: 10px;
-      background-color: rgba(255, 255, 0, 0.1);
-      border: 1px dashed rgba(255, 255, 0, 0.5);
-      border-radius: 6px;
-      padding: 8px 10px;
-      font-size: 0.85rem;
+    .qr-container {
+      background: linear-gradient(145deg, #1e1e2f, #252540);
+      border-radius: 20px;
+      box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+      padding: 30px;
+      position: relative;
+      width: 90%;
+      max-width: 500px;
+      border: 2px solid rgb(255, 111, 0);
+      text-align: center;
+      animation: modalFadeIn 0.5s;
     }
-    
-    /* Razorpay Button Styling */
-    .razorpay-button {
-      background: linear-gradient(to right, #3371FF, #0048FF);
+
+    @keyframes modalFadeIn {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .qr-header {
+      margin-bottom: 20px;
+    }
+
+    .qr-title {
+      color: rgb(255, 111, 0);
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .qr-subtitle {
+      color: #fff;
+      font-size: 1.1rem;
+      opacity: 0.8;
+    }
+
+    .qr-code-box {
+      background-color: #ffffff;
+      padding: 20px;
+      border-radius: 15px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      width: 250px;
+      height: 250px;
+      margin: 0 auto 20px auto;
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .qr-image {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .qr-fallback {
+      font-size: 0.8rem;
+      color: #333;
+      padding: 10px;
+      text-align: center;
+      display: none;
+    }
+
+    .qr-loading {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(255,255,255,0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border-radius: 15px;
+      z-index: 5;
+    }
+
+    .qr-loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 5px solid rgba(255, 111, 0, 0.3);
+      border-top-color: rgb(255, 111, 0);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    .qr-details {
+      margin: 20px 0;
+      color: white;
+    }
+
+    .qr-amount {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 10px;
+    }
+
+    .qr-upi-id {
+      background: rgba(255, 111, 0, 0.2);
+      padding: 10px 15px;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      color: rgb(255, 111, 0);
+      display: inline-block;
+      margin: 10px 0;
+      border: 1px dashed rgb(255, 111, 0);
+      letter-spacing: 0.5px;
+    }
+
+    .qr-instructions {
+      font-size: 0.9rem;
+      color: white;
+      margin: 15px 0;
+      opacity: 0.8;
+      line-height: 1.5;
+    }
+
+    .qr-footer {
+      margin-top: 20px;
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+    }
+
+    .qr-close-btn {
+      padding: 12px 25px;
+      font-size: 1rem;
+      background: #666;
       color: white;
       border: none;
       border-radius: 8px;
-      padding: 15px 25px;
-      font-size: 1.1rem;
-      font-weight: 600;
       cursor: pointer;
-      transition: all 0.3s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      box-shadow: 0 8px 15px rgba(0, 0, 0, 0.3);
-      margin: 15px auto;
-      width: 90%;
-      position: relative;
-      overflow: hidden;
+      transition: all 0.3s;
+      font-weight: 600;
     }
-    
-    .razorpay-button:hover {
+
+    .qr-close-btn:hover {
+      background: #888;
       transform: translateY(-2px);
-      box-shadow: 0 12px 20px rgba(0, 0, 0, 0.4);
-      background: linear-gradient(to right, #0048FF, #3371FF);
     }
-    
-    .razorpay-button:active {
-      transform: translateY(0);
+
+    .qr-confirm-btn {
+      padding: 12px 25px;
+      font-size: 1rem;
+      background: rgb(255, 111, 0);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s;
+      font-weight: 600;
     }
-    
-    .razorpay-button::after {
-      content: '';
+
+    .qr-confirm-btn:hover {
+      background: #ff6b6b;
+      transform: translateY(-2px);
+    }
+
+    /* Test mode indicator */
+    .test-mode-badge {
       position: absolute;
-      top: 0;
-      left: -100%;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-      transition: 0.5s;
+      top: 20px;
+      right: 20px;
+      background-color: rgba(255, 255, 0, 0.3);
+      color: white;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border: 1px solid rgba(255, 255, 0, 0.5);
     }
-    
-    .razorpay-button:hover::after {
-      left: 100%;
+  
+    /* Remove blue highlight on Android tablets */
+    * {
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      -khtml-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
     }
-    
-    .razorpay-logo {
-      height: 24px;
-      width: auto;
+
+    button, input, textarea, select, a, .btn, [role="button"] {
+      -webkit-tap-highlight-color: rgba(0,0,0,0);
+      -webkit-tap-highlight-color: transparent;
+      outline: none;
+    }
+
+    button:focus, button:active, input:focus, input:active, a:focus, a:active {
+      outline: none;
+      -webkit-tap-highlight-color: transparent;
     }
 
     /* Responsive Adjustments */
@@ -492,24 +624,89 @@
         aspect-ratio: 16/9;
         max-height: 200px;
       }
+      
+      .qr-container {
+        padding: 20px;
+        width: 95%;
+      }
+      
+      .qr-title {
+        font-size: 1.5rem;
+      }
+      
+      .qr-code-box {
+        width: 200px;
+        height: 200px;
+      }
+      
+      .qr-amount {
+        font-size: 1.5rem;
+      }
     }
 
-    /* Test mode indicator */
-    .test-mode-badge {
-      position: absolute;
-      top: 20px;
-      right: 20px;
-      background-color: rgba(255, 255, 0, 0.3);
-      color: white;
-      padding: 5px 10px;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      border: 1px solid rgba(255, 255, 0, 0.5);
+    /* Preloaded QR code for instant display */
+    .preloaded-image {
+      display: none;
     }
-  </style>
-  <!-- Razorpay SDK -->
-  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    
+    /* Waiting for confirmation overlay */
+    .waiting-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.8);
+      z-index: 2000;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      animation: fadeIn 0.3s;
+    }
+    
+    .waiting-container {
+      background: rgba(30, 30, 47, 0.9);
+      border-radius: 15px;
+      padding: 30px;
+      max-width: 400px;
+      width: 90%;
+      text-align: center;
+      border: 2px solid rgb(255, 111, 0);
+    }
+    
+    .waiting-title {
+      color: rgb(255, 111, 0);
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 15px;
+    }
+    
+    .waiting-message {
+      color: white;
+      margin-bottom: 20px;
+    }
+    
+    .waiting-spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid rgba(255, 111, 0, 0.3);
+      border-top-color: rgb(255, 111, 0);
+      border-radius: 50%;
+      margin: 0 auto 20px auto;
+      animation: spin 1s linear infinite;
+    }
+    
+    .waiting-cancel {
+      padding: 10px 20px;
+      background: #f44336;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+</style>
 </head>
 <body>
   <!-- Video Background -->
@@ -564,19 +761,6 @@
         </div>
       </div>
       
-      <!-- UPI Payment Container (Hidden initially) -->
-      <div class="upi-container" id="upiContainer">
-        <h3>Pay via UPI</h3>
-        <p>Quick and secure payment through UPI QR Code</p>
-        <div class="upi-test-note">
-          <strong>Note:</strong> In test mode, scan the UPI QR code with any UPI app or use test UPI ID provided by Razorpay.
-        </div>
-        <button class="razorpay-button" id="upiPayBtn">
-          <img src="https://razorpay.com/assets/razorpay-glyph.svg" alt="Razorpay" class="razorpay-logo">
-          Show UPI QR Code
-        </button>
-      </div>
-      
       <!-- Status Message -->
       <div id="statusMessage" class="status-message info" style="display: none;"></div>
       
@@ -610,10 +794,80 @@
     </div>
   </div>
 
+  <!-- UPI QR Code Modal -->
+  <div id="qrModal" class="qr-modal">
+    <div class="qr-container">
+      <div class="qr-header">
+        <div class="qr-title">UPI Payment</div>
+        <div class="qr-subtitle">Scan with any UPI app to pay</div>
+      </div>
+      
+      <div class="qr-code-box">
+        <img id="qrCodeImage" class="qr-image" src="" alt="UPI QR Code">
+        <div id="qrLoading" class="qr-loading">
+          <div class="qr-loading-spinner"></div>
+        </div>
+        <div class="qr-fallback" id="qrFallback">
+          Unable to load QR code. Please pay directly to UPI ID below.
+        </div>
+      </div>
+      
+      <div class="qr-details">
+        <div class="qr-amount">₹<span id="qrAmountDisplay">130</span></div>
+        <div class="qr-upi-id" id="qrUpiId">gamespotkdlr@okhdfcbank</div>
+        <div class="qr-instructions">
+          1. Open any UPI app (GPay, PhonePe, Paytm, etc.)<br>
+          2. Scan this QR code or enter UPI ID manually<br>
+          3. Enter the amount shown above<br>
+          4. Complete payment and click "Confirm Payment"
+        </div>
+      </div>
+      
+      <div class="qr-footer">
+        <button id="qrCloseBtn" class="qr-close-btn">Cancel</button>
+        <button id="qrConfirmBtn" class="qr-confirm-btn">Confirm Payment</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Waiting for confirmation overlay -->
+  <div id="waitingOverlay" class="waiting-overlay">
+    <div class="waiting-container">
+      <div class="waiting-spinner"></div>
+      <div class="waiting-title">Payment Pending</div>
+      <div class="waiting-message">Waiting for payment confirmation from admin...</div>
+      <button id="waitingCancelBtn" class="waiting-cancel">Cancel</button>
+    </div>
+  </div>
+  
+  <!-- Preloaded image for QR codes -->
+  <div class="preloaded-image">
+    <img id="preloadedQR" src="">
+  </div>
+
   <script>
+    // Firebase Configuration
+    const firebaseConfig = {
+      // REPLACE WITH YOUR FIREBASE CONFIG FROM FIREBASE CONSOLE
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+      projectId: "YOUR_PROJECT",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+    
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
     // Global variables
     let stream = null;
     let selectedPaymentMethod = null;
+    const upiId = "gamespotkdlr@okhdfcbank";
+    let currentPaymentId = null;
+    let paymentListeners = {};
     
     // DOM elements
     const cameraFeed = document.getElementById('cameraFeed');
@@ -623,12 +877,24 @@
     const backBtn = document.getElementById('backBtn');
     const statusMessage = document.getElementById('statusMessage');
     const paymentMethods = document.querySelectorAll('.payment-method');
-    const upiContainer = document.getElementById('upiContainer');
-    const upiPayBtn = document.getElementById('upiPayBtn');
-
-    // Razorpay test API key
-    const razorpayKey = 'rzp_test_Q09FbMo7iqjf4D';
     
+    // QR Modal elements
+    const qrModal = document.getElementById('qrModal');
+    const qrCodeImage = document.getElementById('qrCodeImage');
+    const qrLoading = document.getElementById('qrLoading');
+    const qrFallback = document.getElementById('qrFallback');
+    const qrAmountDisplay = document.getElementById('qrAmountDisplay');
+    const qrUpiId = document.getElementById('qrUpiId');
+    const qrCloseBtn = document.getElementById('qrCloseBtn');
+    const qrConfirmBtn = document.getElementById('qrConfirmBtn');
+    
+    // Waiting overlay elements
+    const waitingOverlay = document.getElementById('waitingOverlay');
+    const waitingCancelBtn = document.getElementById('waitingCancelBtn');
+    
+    // Preloaded QR element
+    const preloadedQR = document.getElementById('preloadedQR');
+
     // Initialize payment details from local storage
     function initPaymentDetails() {
       // Get console information
@@ -663,6 +929,21 @@
       document.getElementById('selectedDuration').textContent = durationDisplay;
       document.getElementById('selectedPlayers').textContent = `${players} Player${players > 1 ? 's' : ''}`;
       document.getElementById('totalAmount').textContent = `₹${totalPrice}`;
+      qrAmountDisplay.textContent = totalPrice;
+      qrUpiId.textContent = upiId;
+      
+      // Preload QR code
+      preloadQRCode(totalPrice);
+    }
+    
+    // Preload QR code
+    function preloadQRCode(amount) {
+      const payeeName = encodeURIComponent("Gamespot Kiosk");
+      const upiPaymentUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${payeeName}&am=${amount}&cu=INR&tn=Gaming%20Session`;
+      const googleChartUrl = `https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${encodeURIComponent(upiPaymentUrl)}&chld=H|1`;
+      
+      // Set the src to preload
+      preloadedQR.src = googleChartUrl;
     }
 
     // Auto-initialize camera as soon as the page loads
@@ -718,6 +999,193 @@
         return null;
       }
     }
+    
+    // Generate UPI QR code - FIXED VERSION
+    function generateUpiQrCode(amount) {
+      qrLoading.style.display = 'flex';
+      qrFallback.style.display = 'none';
+      
+      try {
+        // Use the preloaded QR code if available
+        if (preloadedQR.complete && preloadedQR.naturalHeight !== 0) {
+          qrCodeImage.src = preloadedQR.src;
+          qrLoading.style.display = 'none';
+          console.log("Using preloaded QR code");
+          return;
+        }
+        
+        // Generate new QR code
+        const payeeName = encodeURIComponent("Gamespot Kiosk");
+        const upiPaymentUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${payeeName}&am=${amount}&cu=INR&tn=Gaming%20Session`;
+        const googleChartUrl = `https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${encodeURIComponent(upiPaymentUrl)}&chld=H|1`;
+        
+        // Set image source
+        qrCodeImage.onload = function() {
+          qrLoading.style.display = 'none';
+          console.log("QR code loaded successfully");
+        };
+        
+        qrCodeImage.onerror = function() {
+          console.error("Failed to load QR code from Google Charts");
+          qrLoading.style.display = 'none';
+          qrFallback.style.display = 'block';
+          
+          // Try using a backup QR code service
+          const backupQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiPaymentUrl)}`;
+          console.log("Trying backup QR service:", backupQrUrl);
+          
+          qrCodeImage.onload = function() {
+            qrFallback.style.display = 'none';
+            console.log("Backup QR code loaded successfully");
+          };
+          
+          qrCodeImage.onerror = function() {
+            qrFallback.style.display = 'block';
+            console.error("All QR code services failed");
+          };
+          
+          qrCodeImage.src = backupQrUrl;
+        };
+        
+        qrCodeImage.src = googleChartUrl;
+      } catch (error) {
+        console.error("Error generating QR code:", error);
+        qrLoading.style.display = 'none';
+        qrFallback.style.display = 'block';
+      }
+    }
+
+    // Send payment alert to remote admin devices
+    function sendPaymentAlert(method, amount) {
+      try {
+        const consoleName = document.getElementById('selectedConsole').textContent;
+        const durationText = document.getElementById('selectedDuration').textContent;
+        const players = document.getElementById('selectedPlayers').textContent.split(' ')[0];
+        
+        // Extract minutes from duration text
+        let minutes;
+        if (durationText.includes('min')) {
+          minutes = parseInt(durationText.match(/\d+/)[0]);
+        } else if (durationText.includes('hour')) {
+          if (durationText.includes('1.5')) {
+            minutes = 90;
+          } else {
+            minutes = parseInt(durationText.match(/\d+/)[0]) * 60;
+          }
+        }
+        
+        // Create a pending payment object
+        const paymentId = `payment-${Date.now()}`;
+        const paymentData = {
+          id: paymentId,
+          console: consoleName,
+          minutes: minutes,
+          method: method,
+          players: parseInt(players),
+          amount: parseInt(amount),
+          createdAt: new Date().toISOString(),
+          status: 'pending'
+        };
+        
+        // Send to Firebase
+        database.ref(`pendingPayments/${paymentId}`).set(paymentData)
+          .then(() => {
+            console.log('Payment alert sent successfully');
+            return paymentId;
+          })
+          .catch(error => {
+            console.error('Error sending payment alert:', error);
+            throw error;
+          });
+        
+        return paymentId;
+      } catch (error) {
+        console.error("Error creating payment alert:", error);
+        return null;
+      }
+    }
+
+    // Check for payment confirmation
+    function startPaymentConfirmationCheck(paymentId) {
+      // Show waiting overlay
+      waitingOverlay.style.display = 'flex';
+      
+      // Hide QR modal
+      qrModal.style.display = 'none';
+      
+      // Store current payment ID
+      currentPaymentId = paymentId;
+      
+      // Listen for confirmation
+      const confirmedRef = database.ref(`confirmedPayments/${paymentId}`);
+      const canceledRef = database.ref(`canceledPayments/${paymentId}`);
+      
+      // Confirmation listener
+      paymentListeners.confirm = confirmedRef.on('value', snapshot => {
+        if (snapshot.exists()) {
+          // Payment confirmed
+          removePaymentListeners(paymentId);
+          waitingOverlay.style.display = 'none';
+          
+          handleSuccessfulPayment(null, selectedPaymentMethod, document.getElementById('totalAmount').textContent.replace('₹', ''));
+        }
+      });
+      
+      // Cancellation listener
+      paymentListeners.cancel = canceledRef.on('value', snapshot => {
+        if (snapshot.exists()) {
+          // Payment canceled
+          removePaymentListeners(paymentId);
+          waitingOverlay.style.display = 'none';
+          
+          showStatusMessage('Payment was canceled by admin', 'error');
+          payBtn.disabled = false;
+          payBtn.innerHTML = 'Pay Now';
+        }
+      });
+      
+      // Set up cancel button
+      waitingCancelBtn.onclick = function() {
+        cancelCurrentPayment();
+      };
+    }
+    
+    // Cancel the current payment
+    function cancelCurrentPayment() {
+      if (currentPaymentId) {
+        // Remove the pending payment
+        database.ref(`pendingPayments/${currentPaymentId}`).remove()
+          .then(() => {
+            console.log('Payment request canceled');
+            removePaymentListeners(currentPaymentId);
+            waitingOverlay.style.display = 'none';
+            
+            showStatusMessage('Payment request canceled', 'info');
+            payBtn.disabled = false;
+            payBtn.innerHTML = 'Pay Now';
+            
+            currentPaymentId = null;
+          })
+          .catch(error => {
+            console.error('Error canceling payment:', error);
+          });
+      } else {
+        waitingOverlay.style.display = 'none';
+      }
+    }
+    
+    // Remove payment listeners
+    function removePaymentListeners(paymentId) {
+      if (paymentListeners.confirm) {
+        database.ref(`confirmedPayments/${paymentId}`).off('value', paymentListeners.confirm);
+      }
+      
+      if (paymentListeners.cancel) {
+        database.ref(`canceledPayments/${paymentId}`).off('value', paymentListeners.cancel);
+      }
+      
+      paymentListeners = {};
+    }
 
     // Add click event listeners to payment methods
     document.querySelectorAll('.payment-method').forEach(method => {
@@ -733,15 +1201,6 @@
         // Set the selected payment method
         selectedPaymentMethod = this.getAttribute('data-method');
         
-        // Show/hide UPI container based on selection
-        if (selectedPaymentMethod === 'upi') {
-          upiContainer.style.display = 'block';
-          payBtn.style.display = 'none'; // Hide the regular pay button for UPI
-        } else {
-          upiContainer.style.display = 'none';
-          payBtn.style.display = 'block'; // Show the regular pay button for cash
-        }
-        
         // Enable the pay button if we have a camera stream
         if (stream && stream.active) {
           payBtn.disabled = false;
@@ -752,92 +1211,82 @@
       };
     });
     
-    // Initialize Razorpay UPI payment - OPTIMIZED FOR UPI QR CODE
-    upiPayBtn.addEventListener('click', function() {
-      if (!stream || !stream.active) {
-        showStatusMessage('Please enable your camera first.', 'error');
-        return;
-      }
-      
-      // Get payment amount
+    // Show QR modal and generate QR code
+    function showQrModal() {
       const amount = document.getElementById('totalAmount').textContent.replace('₹', '');
-      const amountInPaise = parseFloat(amount) * 100; // Razorpay expects amount in paise
+      qrAmountDisplay.textContent = amount;
       
-      // Get other booking details
-      const consoleName = document.getElementById('selectedConsole').textContent;
-      const duration = document.getElementById('selectedDuration').textContent;
+      // Generate and display QR code
+      generateUpiQrCode(amount);
       
-      // Capture photo first before proceeding with payment
-      const photoDataUrl = capturePhoto();
-      if (!photoDataUrl) {
-        showStatusMessage('Failed to capture verification photo. Please try again.', 'error');
-        return;
-      }
-      
-      // Store the photo data for later
-      const endTime = Date.now() + (parseInt(localStorage.getItem('selectedDuration')) * 60 * 1000);
-      const bookingId = `${consoleName}-${endTime}`;
-      
-      // Get existing photos or create new object
-      const photosJSON = localStorage.getItem('userPhotos') || '{}';
-      let photos;
+      // Show modal
+      qrModal.style.display = 'flex';
+    }
+    
+    // Close QR modal
+    qrCloseBtn.addEventListener('click', function() {
+      qrModal.style.display = 'none';
+    });
+    
+    // Handle UPI payment confirmation
+    qrConfirmBtn.addEventListener('click', async function() {
       try {
-        photos = JSON.parse(photosJSON);
-      } catch (e) {
-        photos = {};
-      }
-      
-      // Store the new photo with the booking ID as key
-      photos[bookingId] = photoDataUrl;
-      localStorage.setItem('userPhotos', JSON.stringify(photos));
-      
-      // CONFIGURATION OPTIMIZED FOR UPI QR CODE
-      const options = {
-        key: razorpayKey,
-        amount: amountInPaise,
-        currency: "INR",
-        name: "Gamespot Kiosk",
-        description: `${duration} on ${consoleName}`,
-        image: "https://via.placeholder.com/150/FF6F00/FFFFFF?text=GS",
-        prefill: {
-          name: "Azonix07",
-          contact: "9876543210",
-          email: "test@example.com"
-        },
-        theme: {
-          color: "#0048FF"
-        },
-        modal: {
-          ondismiss: function() {
-            showStatusMessage('Payment cancelled.', 'error');
-          },
-          escape: false, // Prevent closing with ESC key
-          animation: true // Enable animations
-        },
-        options: {
-          checkout: {
-            method: {
-              upi: {
-                flow: "qr" // Force QR code display for UPI
-              }
-            }
-          }
-        },
-        handler: function(response) {
-          // Handle successful payment
-          handleSuccessfulPayment(response, 'upi', amount);
+        const amount = qrAmountDisplay.textContent;
+        
+        // Show processing state
+        qrConfirmBtn.disabled = true;
+        qrConfirmBtn.innerHTML = 'Processing <div class="loading-spinner"></div>';
+        
+        // Capture photo for verification
+        const photoDataUrl = capturePhoto();
+        if (!photoDataUrl) {
+          showStatusMessage('Failed to capture verification photo. Please try again.', 'error');
+          qrConfirmBtn.disabled = false;
+          qrConfirmBtn.textContent = 'Confirm Payment';
+          return;
         }
-      };
-      
-      // Create a new instance of Razorpay
-      const razorpay = new Razorpay(options);
-      razorpay.open();
-      
-      // Show info message
-      showStatusMessage('UPI QR Code payment opened - scan with your UPI app', 'info');
+        
+        // Store the photo data for later
+        const consoleName = document.getElementById('selectedConsole').textContent;
+        const endTime = Date.now() + (parseInt(localStorage.getItem('selectedDuration')) * 60 * 1000);
+        const bookingId = `${consoleName}-${endTime}`;
+        
+        // Get existing photos or create new object
+        const photosJSON = localStorage.getItem('userPhotos') || '{}';
+        let photos;
+        try {
+          photos = JSON.parse(photosJSON);
+        } catch (e) {
+          photos = {};
+        }
+        
+        // Store the new photo with the booking ID as key
+        photos[bookingId] = photoDataUrl;
+        localStorage.setItem('userPhotos', JSON.stringify(photos));
+        
+        // Send payment alert to remote devices
+        const paymentId = sendPaymentAlert('upi', amount);
+        
+        if (paymentId) {
+          // Start waiting for confirmation
+          startPaymentConfirmationCheck(paymentId);
+        } else {
+          // Process locally if remote alert fails
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          handleSuccessfulPayment(null, 'upi', amount);
+        }
+        
+        // Hide QR modal
+        qrModal.style.display = 'none';
+      } catch (err) {
+        console.error('UPI payment error:', err);
+        showStatusMessage(`Payment error: ${err.message}. Please try again.`, 'error');
+        qrConfirmBtn.disabled = false;
+        qrConfirmBtn.textContent = 'Confirm Payment';
+      }
     });
 
-    // Handle payment - Store photo and simulate payment
+    // Handle payment - Show QR code for UPI or process cash payment
     payBtn.addEventListener('click', async () => {
       if (!stream || !stream.active) {
         showStatusMessage('Please enable your camera first.', 'error');
@@ -849,55 +1298,62 @@
         return;
       }
       
-      // Disable button and show loading state
-      payBtn.disabled = true;
-      payBtn.innerHTML = 'Processing <div class="loading-spinner"></div>';
-      
-      try {
-        // Get payment details
-        const consoleName = document.getElementById('selectedConsole').textContent;
-        const durationText = document.getElementById('selectedDuration').textContent;
+      // Handle based on payment method
+      if (selectedPaymentMethod === 'upi') {
+        // Show UPI QR code modal
+        showQrModal();
+      } else {
+        // Handle cash payment
+        // Disable button and show loading state
+        payBtn.disabled = true;
+        payBtn.innerHTML = 'Processing <div class="loading-spinner"></div>';
         
-        // Extract number from duration text like "30 min" or "1 hour"
-        let durationMin;
-        if (durationText.includes('min')) {
-          durationMin = parseInt(durationText.match(/\d+/)[0]);
-        } else if (durationText.includes('hour')) {
-          if (durationText.includes('1.5')) {
-            durationMin = 90;
+        try {
+          // Get payment details
+          const consoleName = document.getElementById('selectedConsole').textContent;
+          const durationText = document.getElementById('selectedDuration').textContent;
+          
+          // Extract number from duration text
+          let durationMin;
+          if (durationText.includes('min')) {
+            durationMin = parseInt(durationText.match(/\d+/)[0]);
+          } else if (durationText.includes('hour')) {
+            if (durationText.includes('1.5')) {
+              durationMin = 90;
+            } else {
+              durationMin = parseInt(durationText.match(/\d+/)[0]) * 60;
+            }
           } else {
-            durationMin = parseInt(durationText.match(/\d+/)[0]) * 60;
+            throw new Error('Could not determine duration');
           }
-        } else {
-          throw new Error('Could not determine duration');
+          
+          const amount = document.getElementById('totalAmount').textContent.replace('₹', '');
+          
+          // Capture the photo for storage
+          const photoDataUrl = capturePhoto();
+          
+          console.log('Processing cash payment:', {
+            console: consoleName,
+            minutes: durationMin,
+            method: 'cash',
+            amount: amount,
+            hasPhoto: !!photoDataUrl
+          });
+          
+          // Wait a bit to simulate processing
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          // Handle the successful payment - for cash, we don't need remote confirmation
+          handleSuccessfulPayment(null, 'cash', amount);
+          
+        } catch (err) {
+          console.error('Payment error:', err);
+          showStatusMessage(`Payment error: ${err.message}. Please try again.`, 'error');
+          
+          // Reset button state
+          payBtn.innerHTML = 'Pay Now';
+          payBtn.disabled = false;
         }
-        
-        const amount = document.getElementById('totalAmount').textContent.replace('₹', '');
-        
-        // Capture the photo for storage
-        const photoDataUrl = capturePhoto();
-        
-        console.log('Simulating payment:', {
-          console: consoleName,
-          minutes: durationMin,
-          method: selectedPaymentMethod,
-          amount: amount,
-          hasPhoto: !!photoDataUrl
-        });
-        
-        // Wait a bit to simulate processing
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        // Handle the successful payment
-        handleSuccessfulPayment(null, selectedPaymentMethod, amount);
-        
-      } catch (err) {
-        console.error('Payment error:', err);
-        showStatusMessage(`Payment error: ${err.message}. Please try again.`, 'error');
-        
-        // Reset button state
-        payBtn.innerHTML = 'Pay Now';
-        payBtn.disabled = false;
       }
     });
 
@@ -933,14 +1389,17 @@
       }
     }
 
-    // UPDATED: Handle successful payment completion - Now includes API call to server and ESP32 power control
+    // Handle successful payment completion
     async function handleSuccessfulPayment(response, method, amount) {
       try {
+        // Clear any waiting state
+        waitingOverlay.style.display = 'none';
+        
         // Get payment details
         const consoleName = document.getElementById('selectedConsole').textContent;
         const durationText = document.getElementById('selectedDuration').textContent;
         
-        // Extract number from duration text like "30 min" or "1 hour"
+        // Extract number from duration text
         let durationMin;
         if (durationText.includes('min')) {
           durationMin = parseInt(durationText.match(/\d+/)[0]);
@@ -1020,7 +1479,6 @@
         } catch (apiErr) {
           console.error("API payment error:", apiErr);
           showStatusMessage(`Server payment processing warning: ${apiErr.message}. Local booking will still work.`, "info");
-          // Continue with local booking even if server API fails
         }
         
         // Store booking in the new multi-booking format
@@ -1062,6 +1520,12 @@
           stream.getTracks().forEach(track => track.stop());
         }
         
+        // Clean up Firebase listeners
+        if (currentPaymentId) {
+          removePaymentListeners(currentPaymentId);
+          currentPaymentId = null;
+        }
+        
         // Redirect after a delay
         setTimeout(() => {
           window.location.href = 'index.html';
@@ -1070,6 +1534,12 @@
       } catch (err) {
         console.error('Payment processing error:', err);
         showStatusMessage(`Payment processing error: ${err.message}. Please contact support.`, 'error');
+        
+        // Clean up Firebase listeners
+        if (currentPaymentId) {
+          removePaymentListeners(currentPaymentId);
+          currentPaymentId = null;
+        }
       }
     }
 
@@ -1078,6 +1548,12 @@
       // Stop camera stream if it's active
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
+      }
+      
+      // Clean up Firebase listeners
+      if (currentPaymentId) {
+        removePaymentListeners(currentPaymentId);
+        currentPaymentId = null;
       }
       
       // Go back to duration selection
@@ -1095,16 +1571,33 @@
         statusMessage.style.display = 'none';
       }, 5000);
     }
+    
+    // Listen for admin commands (like redirect)
+    function listenForAdminCommands() {
+      const commandsRef = database.ref('commands');
+      commandsRef.limitToLast(1).on('child_added', snapshot => {
+        const command = snapshot.val();
+        
+        if (command && Date.now() - command.timestamp < 60000) { // Only process commands from the last minute
+          console.log('Received admin command:', command);
+          
+          if (command.type === 'redirect' && command.page) {
+            // Redirect to the specified page
+            window.location.href = command.page;
+          }
+        }
+      });
+    }
 
     // Initialize page
     function init() {
       // Store current date and time in a variable
-      const currentDateTime = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-07-23 12:15:44";
+      const currentDateTime = "Current Date and Time (UTC - YYYY-MM-DD HH:MM:SS formatted): 2025-08-05 08:43:57";
       const currentUser = "Current User's Login: Azonix07";
       
       initPaymentDetails();
-      // Automatically initialize the camera
       initCamera();
+      listenForAdminCommands();
     }
 
     // Start initialization when page loads
